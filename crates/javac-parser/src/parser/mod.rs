@@ -51,7 +51,7 @@ impl Parser {
             errors: Vec::new(),
         };
 
-        parser.compilation_unit();
+        top_level::compilation_unit(&mut parser);
         let green_node = parser.builder.finish();
 
         Parse {
@@ -60,10 +60,10 @@ impl Parser {
         }
     }
 
-    pub(crate) fn node(&mut self, kind: JavaSyntaxKind, f: impl FnOnce(&mut Parser)) {
-        self.builder.start_node(kind.into());
-        f(self);
-        self.builder.finish_node();
+    pub(crate) fn start(&mut self) -> Marker {
+        let _pos = self.pos;
+        let checkpoint = self.builder.checkpoint();
+        Marker { _pos, checkpoint }
     }
 
     pub(crate) fn kind(&self) -> JavaSyntaxKind {
@@ -104,5 +104,21 @@ impl Parser {
     pub(crate) fn err_and_bump(&mut self, msg: impl Into<String>) {
         self.err(msg);
         self.bump();
+    }
+}
+
+pub(crate) struct Marker {
+    _pos: usize,
+    checkpoint: rowan::Checkpoint,
+}
+
+impl Marker {
+    pub(crate) fn complete(self, p: &mut Parser, kind: JavaSyntaxKind) {
+        p.builder.start_node_at(self.checkpoint, kind.into());
+        p.builder.finish_node();
+    }
+
+    pub(crate) fn abandon(self, _p: &mut Parser) {
+     
     }
 }

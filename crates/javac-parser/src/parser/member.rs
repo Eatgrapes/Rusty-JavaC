@@ -1,180 +1,192 @@
 use crate::parser::{Parser, JavaSyntaxKind};
+use crate::parser::{top_level, ty, type_decl, stmt, expr};
 
-impl Parser {
-    pub(crate) fn record_component_list(&mut self) {
-        use JavaSyntaxKind::*;
-        self.node(RecordComponentList, |p| {
-            p.expect(LParen);
-            while !p.at(RParen) && p.kind() != Error {
-                p.node(RecordComponent, |p| {
-                    p.modifier_list();
-                    p.type_();
-                    p.expect(Ident);
-                });
-                if !p.eat(Comma) { break; }
+pub(crate) fn record_component_list(p: &mut Parser) {
+    use JavaSyntaxKind::*;
+    let m = p.start();
+    p.expect(LParen);
+    while !p.at(RParen) && p.kind() != Error {
+        let cm = p.start();
+        top_level::modifier_list(p);
+        ty::type_(p);
+        p.expect(Ident);
+        cm.complete(p, RecordComponent);
+        if !p.eat(Comma) { break; }
+    }
+    p.expect(RParen);
+    m.complete(p, RecordComponentList);
+}
+
+pub(crate) fn class_member(p: &mut Parser) {
+    use JavaSyntaxKind::*;
+    if p.at(LBrace) {
+        let m = p.start();
+        stmt::block(p);
+        m.complete(p, InstanceInit);
+        return;
+    }
+    if p.at(StaticKw) && p.look(1) == LBrace {
+        let m = p.start();
+        p.eat(StaticKw);
+        stmt::block(p);
+        m.complete(p, StaticInit);
+        return;
+    }
+
+    top_level::modifier_list(p);
+
+    if p.at_any(&[ClassKw, InterfaceKw, EnumKw, RecordKw]) ||
+       (p.at(At) && p.look(1) == InterfaceKw)
+    {
+        type_decl::type_decl(p);
+        return;
+    }
+
+    if is_constructor(p) {
+        constructor_decl(p);
+    } else if is_method_decl(p) {
+        method_decl(p);
+    } else {
+        field_decl(p);
+    }
+}
+
+pub(crate) fn is_constructor(p: &Parser) -> bool {
+    let i = p.pos;
+    i < p.tokens.len()
+        && p.tokens[i].kind == JavaSyntaxKind::Ident
+        && i + 1 < p.tokens.len()
+        && (p.tokens[i + 1].kind == JavaSyntaxKind::LParen
+            || p.tokens[i + 1].kind == JavaSyntaxKind::LBrace)
+}
+
+pub(crate) fn constructor_decl(p: &mut Parser) {
+    use JavaSyntaxKind::*;
+    let m = p.start();
+    p.expect(Ident);
+    if p.at(LParen) { formal_param_list(p); }
+    if p.at(ThrowsKw) { throws_clause(p); }
+    let bm = p.start();
+    stmt::block(p);
+    bm.complete(p, MethodBody);
+    m.complete(p, ConstructorDecl);
+}
+
+pub(crate) fn is_method_decl(p: &mut Parser) -> bool {
+    let mut i = p.pos;
+    while i < p.tokens.len() && p.tokens[i].kind == JavaSyntaxKind::At {
+        i += 1;
+        if i < p.tokens.len() && p.tokens[i].kind == JavaSyntaxKind::Ident { i += 1; }
+        if i < p.tokens.len() && p.tokens[i].kind == JavaSyntaxKind::LParen {
+            let mut depth = 0;
+            while i < p.tokens.len() {
+                match p.tokens[i].kind {
+                    JavaSyntaxKind::LParen => depth += 1,
+                    JavaSyntaxKind::RParen => { depth -= 1; if depth == 0 { i += 1; break; } }
+                    _ => {}
+                }
+                i += 1;
             }
-            p.expect(RParen);
-        });
-    }
-
-    pub(crate) fn class_member(&mut self) {
-        use JavaSyntaxKind::*;
-        if self.at(LBrace) {
-            self.node(InstanceInit, |p| { p.block(); });
-            return;
-        }
-        if self.at(StaticKw) && self.look(1) == LBrace {
-            self.node(StaticInit, |p| { p.eat(StaticKw); p.block(); });
-            return;
-        }
-
-        self.modifier_list();
-
-        if self.at_any(&[ClassKw, InterfaceKw, EnumKw, RecordKw]) ||
-           (self.at(At) && self.look(1) == InterfaceKw)
-        {
-            self.type_decl();
-            return;
-        }
-
-        if self.is_constructor() {
-            self.constructor_decl();
-        } else if self.is_method_decl() {
-            self.method_decl();
-        } else {
-            self.field_decl();
         }
     }
-
-    pub(crate) fn is_constructor(&self) -> bool {
-        let i = self.pos;
-        i < self.tokens.len()
-            && self.tokens[i].kind == JavaSyntaxKind::Ident
-            && i + 1 < self.tokens.len()
-            && (self.tokens[i + 1].kind == JavaSyntaxKind::LParen
-                || self.tokens[i + 1].kind == JavaSyntaxKind::LBrace)
-    }
-
-    pub(crate) fn constructor_decl(&mut self) {
-        use JavaSyntaxKind::*;
-        self.node(ConstructorDecl, |p| {
-            p.expect(Ident);
-            if p.at(LParen) { p.formal_param_list(); }
-            if p.at(ThrowsKw) { p.throws_clause(); }
-            p.node(MethodBody, |p| { p.block(); });
-        });
-    }
-
-    pub(crate) fn is_method_decl(&mut self) -> bool {
-        let mut i = self.pos;
-        while i < self.tokens.len() && self.tokens[i].kind == JavaSyntaxKind::At {
+    let primitives = [JavaSyntaxKind::IntKw, JavaSyntaxKind::LongKw, JavaSyntaxKind::ShortKw,
+        JavaSyntaxKind::ByteKw, JavaSyntaxKind::CharKw, JavaSyntaxKind::FloatKw,
+        JavaSyntaxKind::DoubleKw, JavaSyntaxKind::BooleanKw, JavaSyntaxKind::VoidKw];
+    if i < p.tokens.len() && primitives.contains(&p.tokens[i].kind) {
+        i += 1;
+    } else {
+        while i < p.tokens.len() && p.tokens[i].kind == JavaSyntaxKind::Ident {
             i += 1;
-            if i < self.tokens.len() && self.tokens[i].kind == JavaSyntaxKind::Ident { i += 1; }
-            if i < self.tokens.len() && self.tokens[i].kind == JavaSyntaxKind::LParen {
+            if i < p.tokens.len() && p.tokens[i].kind == JavaSyntaxKind::Lt {
                 let mut depth = 0;
-                while i < self.tokens.len() {
-                    match self.tokens[i].kind {
-                        JavaSyntaxKind::LParen => depth += 1,
-                        JavaSyntaxKind::RParen => { depth -= 1; if depth == 0 { i += 1; break; } }
+                while i < p.tokens.len() {
+                    match p.tokens[i].kind {
+                        JavaSyntaxKind::Lt => depth += 1,
+                        JavaSyntaxKind::Gt => { depth -= 1; if depth == 0 { i += 1; break; } }
                         _ => {}
                     }
                     i += 1;
                 }
             }
+            if i < p.tokens.len() && p.tokens[i].kind == JavaSyntaxKind::Dot { i += 1; } else { break; }
         }
-        let primitives = [JavaSyntaxKind::IntKw, JavaSyntaxKind::LongKw, JavaSyntaxKind::ShortKw,
-            JavaSyntaxKind::ByteKw, JavaSyntaxKind::CharKw, JavaSyntaxKind::FloatKw,
-            JavaSyntaxKind::DoubleKw, JavaSyntaxKind::BooleanKw, JavaSyntaxKind::VoidKw];
-        if i < self.tokens.len() && primitives.contains(&self.tokens[i].kind) {
-            i += 1;
-        } else {
-            while i < self.tokens.len() && self.tokens[i].kind == JavaSyntaxKind::Ident {
-                i += 1;
-                if i < self.tokens.len() && self.tokens[i].kind == JavaSyntaxKind::Lt {
-                    let mut depth = 0;
-                    while i < self.tokens.len() {
-                        match self.tokens[i].kind {
-                            JavaSyntaxKind::Lt => depth += 1,
-                            JavaSyntaxKind::Gt => { depth -= 1; if depth == 0 { i += 1; break; } }
-                            _ => {}
-                        }
-                        i += 1;
-                    }
-                }
-                if i < self.tokens.len() && self.tokens[i].kind == JavaSyntaxKind::Dot { i += 1; } else { break; }
-            }
-        }
-        while i + 1 < self.tokens.len() && self.tokens[i].kind == JavaSyntaxKind::LBrack && self.tokens[i + 1].kind == JavaSyntaxKind::RBrack {
+    }
+    while i + 1 < p.tokens.len() && p.tokens[i].kind == JavaSyntaxKind::LBrack && p.tokens[i + 1].kind == JavaSyntaxKind::RBrack {
+        i += 2;
+    }
+    if i < p.tokens.len() && p.tokens[i].kind == JavaSyntaxKind::Ident {
+        i += 1;
+        while i + 1 < p.tokens.len() && p.tokens[i].kind == JavaSyntaxKind::LBrack && p.tokens[i + 1].kind == JavaSyntaxKind::RBrack {
             i += 2;
         }
-        if i < self.tokens.len() && self.tokens[i].kind == JavaSyntaxKind::Ident {
-            i += 1;
-            while i + 1 < self.tokens.len() && self.tokens[i].kind == JavaSyntaxKind::LBrack && self.tokens[i + 1].kind == JavaSyntaxKind::RBrack {
-                i += 2;
-            }
+    }
+    i < p.tokens.len() && p.tokens[i].kind == JavaSyntaxKind::LParen
+}
+
+pub(crate) fn method_decl(p: &mut Parser) {
+    use JavaSyntaxKind::*;
+    let m = p.start();
+    ty::type_(p);
+    p.expect(Ident);
+    formal_param_list(p);
+    if p.at(ThrowsKw) { throws_clause(p); }
+    if p.eat(Semi) {
+    } else {
+        let bm = p.start();
+        stmt::block(p);
+        bm.complete(p, MethodBody);
+    }
+    m.complete(p, MethodDecl);
+}
+
+pub(crate) fn field_decl(p: &mut Parser) {
+    use JavaSyntaxKind::*;
+    let m = p.start();
+    ty::type_(p);
+    let vlm = p.start();
+    loop {
+        let vm = p.start();
+        p.expect(Ident);
+        while p.eat(LBrack) { p.expect(RBrack); }
+        if p.eat(Eq) { expr::expr(p); }
+        vm.complete(p, VarDeclarator);
+        if !p.eat(Comma) { break; }
+    }
+    vlm.complete(p, VarDeclaratorList);
+    p.expect(Semi);
+    m.complete(p, FieldDecl);
+}
+
+pub(crate) fn formal_param_list(p: &mut Parser) {
+    use JavaSyntaxKind::*;
+    let m = p.start();
+    p.expect(LParen);
+    while !p.at(RParen) && p.kind() != Error {
+        if p.at(ThisKw) {
+            let rm = p.start();
+            p.bump();
+            rm.complete(p, ReceiverParam);
+            break;
         }
-        i < self.tokens.len() && self.tokens[i].kind == JavaSyntaxKind::LParen
+        let fm = p.start();
+        top_level::modifier_list(p);
+        ty::type_(p);
+        p.eat(Ellipsis);
+        p.expect(Ident);
+        while p.eat(LBrack) { p.expect(RBrack); }
+        fm.complete(p, FormalParam);
+        if !p.eat(Comma) { break; }
     }
+    p.expect(RParen);
+    m.complete(p, FormalParamList);
+}
 
-    pub(crate) fn method_decl(&mut self) {
-        use JavaSyntaxKind::*;
-        self.node(MethodDecl, |p| {
-            p.type_();
-            p.expect(Ident);
-            p.formal_param_list();
-            if p.at(ThrowsKw) { p.throws_clause(); }
-            if p.eat(Semi) {
-            } else {
-                p.node(MethodBody, |p| { p.block(); });
-            }
-        });
-    }
-
-    pub(crate) fn field_decl(&mut self) {
-        use JavaSyntaxKind::*;
-        self.node(FieldDecl, |p| {
-            p.type_();
-            p.node(VarDeclaratorList, |p| {
-                loop {
-                    p.node(VarDeclarator, |p| {
-                        p.expect(Ident);
-                        while p.eat(LBrack) { p.expect(RBrack); }
-                        if p.eat(Eq) { p.expr(); }
-                    });
-                    if !p.eat(Comma) { break; }
-                }
-            });
-            p.expect(Semi);
-        });
-    }
-
-    pub(crate) fn formal_param_list(&mut self) {
-        use JavaSyntaxKind::*;
-        self.node(FormalParamList, |p| {
-            p.expect(LParen);
-            while !p.at(RParen) && p.kind() != Error {
-                if p.at(ThisKw) {
-                    p.node(ReceiverParam, |p| { p.bump(); });
-                    break;
-                }
-                p.node(FormalParam, |p| {
-                    p.modifier_list();
-                    p.type_();
-                    p.eat(Ellipsis);
-                    p.expect(Ident);
-                    while p.eat(LBrack) { p.expect(RBrack); }
-                });
-                if !p.eat(Comma) { break; }
-            }
-            p.expect(RParen);
-        });
-    }
-
-    pub(crate) fn throws_clause(&mut self) {
-        use JavaSyntaxKind::*;
-        self.node(ThrowsClause, |p| {
-            p.expect(ThrowsKw);
-            p.node(ExceptionTypeList, |p| { p.type_list(); });
-        });
-    }
+pub(crate) fn throws_clause(p: &mut Parser) {
+    use JavaSyntaxKind::*;
+    let m = p.start();
+    p.expect(ThrowsKw);
+    let em = p.start();
+    ty::type_list(p);
+    em.complete(p, ExceptionTypeList);
+    m.complete(p, ThrowsClause);
 }
