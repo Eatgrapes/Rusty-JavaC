@@ -1,8 +1,9 @@
 use crate::hir::*;
 use javac_ty::Ty;
+use la_arena::Arena;
 
 impl Expr {
-    pub fn ty(&self) -> Ty {
+    pub fn ty(&self, exprs: &Arena<Expr>) -> Ty {
         match self {
             Expr::IntLiteral(_) => Ty::Int,
             Expr::LongLiteral(_) => Ty::Long,
@@ -22,21 +23,21 @@ impl Expr {
             Expr::ArrayAccess { .. } => Ty::Int,
             Expr::Unary { op, operand } => match op {
                 UnaryOp::Not => Ty::Boolean,
-                _ => operand.ty(),
+                _ => exprs[*operand].ty(exprs),
             },
             Expr::Binary { op, left, .. } => match op {
                 BinaryOp::AndAnd | BinaryOp::OrOr => Ty::Boolean,
                 BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Gt | BinaryOp::Le | BinaryOp::Ge => Ty::Boolean,
-                _ => left.ty(),
+                _ => exprs[*left].ty(exprs),
             },
-            Expr::Ternary { then_expr, .. } => then_expr.ty(),
+            Expr::Ternary { then_expr, .. } => exprs[*then_expr].ty(exprs),
             Expr::Cast { ty, .. } => ty.clone(),
             Expr::Instanceof { .. } => Ty::Boolean,
-            Expr::Assign { value, .. } => value.ty(),
-            Expr::PostInc(inner) | Expr::PostDec(inner) => inner.ty(),
+            Expr::Assign { value, .. } => exprs[*value].ty(exprs),
+            Expr::PostInc(inner) | Expr::PostDec(inner) => exprs[*inner].ty(exprs),
             Expr::Lambda { .. } => Ty::Class("java/lang/Object".to_string()),
             Expr::MethodRef { .. } => Ty::Class("java/lang/Object".to_string()),
-            Expr::Parens(inner) => inner.ty(),
+            Expr::Parens(inner) => exprs[*inner].ty(exprs),
         }
     }
 }

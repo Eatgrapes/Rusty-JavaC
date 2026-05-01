@@ -1,5 +1,9 @@
 use javac_ty::{Ty, MethodSig, TypeParam};
 use std::rc::Rc;
+use la_arena::{Arena, Idx};
+
+pub type ExprId = Idx<Expr>;
+pub type StmtId = Idx<Stmt>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HirId(pub u32);
@@ -46,13 +50,20 @@ pub enum TypeDeclKind {
     Annotation,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct Body {
+    pub exprs: Arena<Expr>,
+    pub stmts: Arena<Stmt>,
+}
+
 #[derive(Debug, Clone)]
 pub struct FieldDecl {
     pub id: HirId,
     pub name: String,
     pub ty: Ty,
     pub access_flags: u16,
-    pub initializer: Option<Expr>,
+    pub body: Body,
+    pub initializer: Option<ExprId>,
 }
 
 #[derive(Debug, Clone)]
@@ -60,56 +71,57 @@ pub struct MethodDecl {
     pub id: HirId,
     pub name: String,
     pub signature: MethodSig,
-    pub body: Option<Block>,
     pub access_flags: u16,
+    pub body: Body,
+    pub root_block: Option<Block>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Block {
-    pub stmts: Vec<Stmt>,
+    pub stmts: Vec<StmtId>,
 }
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
-    Expr(Expr),
+    Expr(ExprId),
     Empty,
     LocalVar(LocalVarDecl),
     If {
-        condition: Expr,
-        then_branch: Box<Stmt>,
-        else_branch: Option<Box<Stmt>>,
+        condition: ExprId,
+        then_branch: StmtId,
+        else_branch: Option<StmtId>,
     },
     For {
-        init: Option<Box<Stmt>>,
-        condition: Option<Expr>,
-        update: Option<Expr>,
-        body: Box<Stmt>,
+        init: Option<StmtId>,
+        condition: Option<ExprId>,
+        update: Option<ExprId>,
+        body: StmtId,
     },
     ForEach {
         var_type: Ty,
         var_name: String,
-        iterable: Expr,
-        body: Box<Stmt>,
+        iterable: ExprId,
+        body: StmtId,
     },
     While {
-        condition: Expr,
-        body: Box<Stmt>,
+        condition: ExprId,
+        body: StmtId,
     },
     Do {
-        body: Box<Stmt>,
-        condition: Expr,
+        body: StmtId,
+        condition: ExprId,
     },
-    Return(Option<Expr>),
-    Throw(Expr),
+    Return(Option<ExprId>),
+    Throw(ExprId),
     Break(Option<String>),
     Continue(Option<String>),
     Try(TryStmt),
-    Synchronized(Expr, Block),
+    Synchronized(ExprId, Block),
     Assert {
-        condition: Expr,
-        message: Option<Expr>,
+        condition: ExprId,
+        message: Option<ExprId>,
     },
-    Yield(Expr),
+    Yield(ExprId),
     Block(Block),
 }
 
@@ -117,25 +129,25 @@ pub enum Stmt {
 pub struct LocalVarDecl {
     pub ty: Ty,
     pub name: String,
-    pub initializer: Option<Expr>,
+    pub initializer: Option<ExprId>,
 }
 
 #[derive(Debug, Clone)]
 pub enum SwitchCase {
     Case {
-        pattern: Expr,
-        body: Vec<Stmt>,
+        pattern: ExprId,
+        body: Vec<StmtId>,
         is_arrow: bool,
     },
     Default {
-        body: Vec<Stmt>,
+        body: Vec<StmtId>,
         is_arrow: bool,
     },
 }
 
 #[derive(Debug, Clone)]
 pub struct TryStmt {
-    pub resources: Vec<Expr>,
+    pub resources: Vec<ExprId>,
     pub body: Block,
     pub catches: Vec<CatchClause>,
     pub finally: Option<Block>,
@@ -164,84 +176,84 @@ pub enum Expr {
     Ident(String),
 
     FieldAccess {
-        target: Box<Expr>,
+        target: ExprId,
         field: String,
     },
 
     MethodCall {
-        target: Option<Box<Expr>>,
+        target: Option<ExprId>,
         method: String,
-        args: Vec<Expr>,
+        args: Vec<ExprId>,
     },
 
     NewObject {
         class: Ty,
-        args: Vec<Expr>,
+        args: Vec<ExprId>,
     },
 
     NewArray {
         element_type: Ty,
-        dimensions: Vec<Option<Expr>>,
+        dimensions: Vec<Option<ExprId>>,
         initializer: Option<ArrayInit>,
     },
 
     ArrayAccess {
-        array: Box<Expr>,
-        index: Box<Expr>,
+        array: ExprId,
+        index: ExprId,
     },
 
     Unary {
         op: UnaryOp,
-        operand: Box<Expr>,
+        operand: ExprId,
     },
 
     Binary {
         op: BinaryOp,
-        left: Box<Expr>,
-        right: Box<Expr>,
+        left: ExprId,
+        right: ExprId,
     },
 
     Ternary {
-        condition: Box<Expr>,
-        then_expr: Box<Expr>,
-        else_expr: Box<Expr>,
+        condition: ExprId,
+        then_expr: ExprId,
+        else_expr: ExprId,
     },
 
     Cast {
         ty: Ty,
-        expr: Box<Expr>,
+        expr: ExprId,
     },
 
     Instanceof {
-        expr: Box<Expr>,
+        expr: ExprId,
         ty: Ty,
     },
 
     Assign {
-        target: Box<Expr>,
+        target: ExprId,
         op: AssignOp,
-        value: Box<Expr>,
+        value: ExprId,
     },
 
-    PostInc(Box<Expr>),
-    PostDec(Box<Expr>),
+    PostInc(ExprId),
+    PostDec(ExprId),
 
     Lambda {
         params: Vec<LambdaParam>,
-        body: Box<LambdaBody>,
+        body: LambdaBody,
     },
 
     MethodRef {
-        target: Box<Expr>,
+        target: ExprId,
         method: String,
     },
 
-    Parens(Box<Expr>),
+    Parens(ExprId),
 }
 
 #[derive(Debug, Clone)]
 pub struct ArrayInit {
-    pub elements: Vec<Expr>,
+    pub elements: Vec<ExprId>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -276,6 +288,6 @@ pub struct LambdaParam {
 
 #[derive(Debug, Clone)]
 pub enum LambdaBody {
-    Expr(Box<Expr>),
+    Expr(ExprId),
     Block(Block),
 }

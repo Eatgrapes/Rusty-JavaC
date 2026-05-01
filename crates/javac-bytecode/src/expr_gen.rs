@@ -4,7 +4,8 @@ use crate::codegen::CodegenCtx;
 use javac_hir::hir::*;
 use javac_ty::Ty;
 
-pub fn gen_expr(mw: &mut MethodWriter, ctx: &mut CodegenCtx, expr: &Expr) {
+pub fn gen_expr(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, expr_id: ExprId) {
+    let expr = &body.exprs[expr_id];
     match expr {
         Expr::IntLiteral(v) => gen_int_const(mw, *v),
         Expr::LongLiteral(v) => gen_long_const(mw, *v),
@@ -33,36 +34,36 @@ pub fn gen_expr(mw: &mut MethodWriter, ctx: &mut CodegenCtx, expr: &Expr) {
         }
         Expr::MethodCall { target, method, args } => {
             if let Some(t) = target {
-                gen_expr(mw, ctx, t);
+                gen_expr(mw, ctx, body, *t);
             }
             for arg in args {
-                gen_expr(mw, ctx, arg);
+                gen_expr(mw, ctx, body, *arg);
             }
             let _ = method;
         }
         Expr::FieldAccess { target, field } => {
-            gen_expr(mw, ctx, target);
+            gen_expr(mw, ctx, body, *target);
             let _ = field;
         }
         Expr::Binary { op, left, right } => {
-            gen_expr(mw, ctx, left);
-            gen_expr(mw, ctx, right);
-            gen_binary_op(mw, op, &left.ty());
+            gen_expr(mw, ctx, body, *left);
+            gen_expr(mw, ctx, body, *right);
+            gen_binary_op(mw, op, &body.exprs[*left].ty(&body.exprs));
         }
         Expr::Unary { op, operand } => {
-            gen_expr(mw, ctx, operand);
-            gen_unary_op(mw, op, &operand.ty());
+            gen_expr(mw, ctx, body, *operand);
+            gen_unary_op(mw, op, &body.exprs[*operand].ty(&body.exprs));
         }
         Expr::NewObject { class, args } => {
             let name = class.internal_name();
             mw.visit_type_insn(opcodes::NEW, &name);
             mw.visit_insn(opcodes::DUP);
-            for arg in args { gen_expr(mw, ctx, arg); }
+            for arg in args { gen_expr(mw, ctx, body, *arg); }
             mw.visit_method_insn(opcodes::INVOKESPECIAL, &name, "<init>", "()V", false);
         }
-        Expr::Parens(inner) => gen_expr(mw, ctx, inner),
+        Expr::Parens(inner) => gen_expr(mw, ctx, body, *inner),
         Expr::Cast { ty, expr: inner } => {
-            gen_expr(mw, ctx, inner);
+            gen_expr(mw, ctx, body, *inner);
             gen_checkcast(mw, ty);
         }
         _ => {}

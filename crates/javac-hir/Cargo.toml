@@ -7,3 +7,4 @@ license.workspace = true
 [dependencies]
 javac-ast = { path = "../javac-ast" }
 javac-ty = { path = "../javac-ty" }
+la-arena = "0.3.1"

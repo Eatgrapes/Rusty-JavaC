@@ -81,6 +81,7 @@ version = "0.1.0"
 dependencies = [
  "javac-ast",
  "javac-ty",
+ "la-arena",
 ]
 
 [[package]]
@@ -110,6 +111,12 @@ dependencies = [
  "javac-ast",
  "thiserror",
 ]
+
+[[package]]
+name = "la-arena"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3752f229dcc5a481d60f385fa479ff46818033d881d2d801aa27dffcfb5e8306"
 
 [[package]]
 name = "logos"

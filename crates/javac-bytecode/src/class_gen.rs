@@ -20,10 +20,10 @@ pub fn gen_class(unit: &CompilationUnit) -> Result<Vec<u8>, String> {
         for method in &td.methods {
             let desc = method.signature.descriptor();
             let mut mw = writer.visit_method(method.access_flags, &method.name, &desc);
-            if let Some(body) = &method.body {
+            if let Some(block) = &method.root_block {
                 mw.visit_code();
                 let mut ctx = CodegenCtx::new(&mut writer, td.name.clone());
-                crate::method_gen::gen_method_body(&mut mw, &mut ctx, body);
+                crate::method_gen::gen_method_body(&mut mw, &mut ctx, &method.body, block);
                 mw.visit_maxs(0, 0);
             }
             mw.visit_end(&mut writer);
