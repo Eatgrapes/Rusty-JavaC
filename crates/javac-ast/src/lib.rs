@@ -303,6 +303,8 @@ impl Language for JavaLanguage {
     }
 }
 
+pub mod ast;
+
 pub type JavaSyntaxNode = rowan::SyntaxNode<JavaLanguage>;
 pub type JavaSyntaxToken = rowan::SyntaxToken<JavaLanguage>;
 pub type JavaSyntaxElement = rowan::SyntaxElement<JavaLanguage>;
