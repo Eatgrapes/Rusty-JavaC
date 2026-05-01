@@ -1,0 +1,11 @@
+[package]
+name = "javac-bytecode"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+javac-hir = { path = "../javac-hir" }
+javac-classfile = { path = "../javac-classfile" }
+javac-ty = { path = "../javac-ty" }
+rust-asm = { workspace = true }

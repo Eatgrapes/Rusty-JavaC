@@ -1,0 +1,12 @@
+[package]
+name = "javac-parser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+javac-ast = { path = "../javac-ast" }
+javac-lexer = { path = "../javac-lexer" }
+javac-diagnostics = { path = "../javac-diagnostics" }
+rowan = { workspace = true }
+text-size = { workspace = true }

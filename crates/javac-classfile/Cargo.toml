@@ -1,0 +1,9 @@
+[package]
+name = "javac-classfile"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rust-asm = { workspace = true }
+thiserror = { workspace = true }

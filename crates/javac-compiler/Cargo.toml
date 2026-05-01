@@ -1,0 +1,15 @@
+[package]
+name = "javac-compiler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+javac-ast = { path = "../javac-ast" }
+javac-lexer = { path = "../javac-lexer" }
+javac-parser = { path = "../javac-parser" }
+javac-hir = { path = "../javac-hir" }
+javac-ty = { path = "../javac-ty" }
+javac-bytecode = { path = "../javac-bytecode" }
+javac-classfile = { path = "../javac-classfile" }
+javac-diagnostics = { path = "../javac-diagnostics" }

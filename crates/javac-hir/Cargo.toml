@@ -1,0 +1,9 @@
+[package]
+name = "javac-hir"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+javac-ast = { path = "../javac-ast" }
+javac-ty = { path = "../javac-ty" }
