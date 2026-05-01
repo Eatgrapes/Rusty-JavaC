@@ -39,7 +39,7 @@ fn parse_type(chars: &[char], pos: usize) -> Option<(Ty, usize)> {
         'L' => {
             let end = chars.iter().skip(pos + 1).position(|&c| c == ';')?;
             let name: String = chars[pos + 1..pos + 1 + end].iter().collect();
-            Some((Ty::Class(name), pos + 1 + end + 1))
+            Some((Ty::Class(ustr::Ustr::from(&name)), pos + 1 + end + 1))
         }
         '[' => {
             let (elem, next) = parse_type(chars, pos + 1)?;

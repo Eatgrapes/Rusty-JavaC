@@ -7,3 +7,4 @@ license.workspace = true
 [dependencies]
 javac-ast = { path = "../javac-ast" }
 thiserror = { workspace = true }
+ustr = "1.1.0"

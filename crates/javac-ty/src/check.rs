@@ -1,12 +1,13 @@
 use crate::ty::Ty;
+use ustr::Ustr;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeError {
     IncompatibleTypes { expected: Ty, found: Ty },
-    NotAccessible { name: String },
+    NotAccessible { name: Ustr },
     NotAssignable { from: Ty, to: Ty },
-    Ambiguous { name: String },
-    NotFound { name: String },
+    Ambiguous { name: Ustr },
+    NotFound { name: Ustr },
 }
 
 pub fn is_assignable(from: &Ty, to: &Ty) -> bool {
@@ -67,14 +68,14 @@ pub fn unboxing_type(ty: &Ty) -> Option<Ty> {
 
 pub fn boxing_type(ty: &Ty) -> Option<Ty> {
     match ty {
-        Ty::Boolean => Some(Ty::Class("java/lang/Boolean".to_string())),
-        Ty::Byte => Some(Ty::Class("java/lang/Byte".to_string())),
-        Ty::Char => Some(Ty::Class("java/lang/Character".to_string())),
-        Ty::Short => Some(Ty::Class("java/lang/Short".to_string())),
-        Ty::Int => Some(Ty::Class("java/lang/Integer".to_string())),
-        Ty::Long => Some(Ty::Class("java/lang/Long".to_string())),
-        Ty::Float => Some(Ty::Class("java/lang/Float".to_string())),
-        Ty::Double => Some(Ty::Class("java/lang/Double".to_string())),
+        Ty::Boolean => Some(Ty::Class(Ustr::from("java/lang/Boolean"))),
+        Ty::Byte => Some(Ty::Class(Ustr::from("java/lang/Byte"))),
+        Ty::Char => Some(Ty::Class(Ustr::from("java/lang/Character"))),
+        Ty::Short => Some(Ty::Class(Ustr::from("java/lang/Short"))),
+        Ty::Int => Some(Ty::Class(Ustr::from("java/lang/Integer"))),
+        Ty::Long => Some(Ty::Class(Ustr::from("java/lang/Long"))),
+        Ty::Float => Some(Ty::Class(Ustr::from("java/lang/Float"))),
+        Ty::Double => Some(Ty::Class(Ustr::from("java/lang/Double"))),
         _ => None,
     }
 }

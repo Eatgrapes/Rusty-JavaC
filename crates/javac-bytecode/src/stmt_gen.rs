@@ -36,7 +36,7 @@ pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_i
             if let Some(init) = &var.initializer {
                 crate::expr_gen::gen_expr(mw, ctx, body, *init);
             }
-            let slot = ctx.alloc_local(&var.name, var.ty.clone());
+            let slot = ctx.alloc_local(var.name, var.ty.clone());
             let store_op = crate::local_var::store_opcode(&var.ty);
             mw.visit_var_insn(store_op, slot);
         }

@@ -1,4 +1,5 @@
 use std::fmt;
+use ustr::Ustr;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Ty {
@@ -11,9 +12,9 @@ pub enum Ty {
     Long,
     Float,
     Double,
-    Class(String),
+    Class(Ustr),
     Array(Box<Ty>),
-    TypeVar(String),
+    TypeVar(Ustr),
     Wildcard(Option<Box<Ty>>),
     Intersection(Vec<Ty>),
 }
@@ -30,7 +31,7 @@ impl Ty {
             Ty::Long => "J".to_string(),
             Ty::Float => "F".to_string(),
             Ty::Double => "D".to_string(),
-            Ty::Class(name) => format!("L{};", name.replace('.', "/")),
+            Ty::Class(name) => format!("L{};", name.as_str().replace('.', "/")),
             Ty::Array(elem) => format!("[{}", elem.descriptor()),
             Ty::TypeVar(_) => "Ljava/lang/Object;".to_string(),
             Ty::Wildcard(_) => "Ljava/lang/Object;".to_string(),
@@ -40,10 +41,10 @@ impl Ty {
 
     pub fn erasure(&self) -> Ty {
         match self {
-            Ty::TypeVar(_) => Ty::Class("java/lang/Object".to_string()),
+            Ty::TypeVar(_) => Ty::Class(Ustr::from("java/lang/Object")),
             Ty::Wildcard(Some(bound)) => bound.erasure(),
-            Ty::Wildcard(None) => Ty::Class("java/lang/Object".to_string()),
-            Ty::Intersection(types) => types.first().map(|t| t.erasure()).unwrap_or(Ty::Class("java/lang/Object".to_string())),
+            Ty::Wildcard(None) => Ty::Class(Ustr::from("java/lang/Object")),
+            Ty::Intersection(types) => types.first().map(|t| t.erasure()).unwrap_or(Ty::Class(Ustr::from("java/lang/Object"))),
             other => other.clone(),
         }
     }
@@ -74,7 +75,7 @@ impl Ty {
 
     pub fn internal_name(&self) -> String {
         match self {
-            Ty::Class(name) => name.clone(),
+            Ty::Class(name) => name.as_str().to_string(),
             Ty::Array(elem) => elem.descriptor(),
             _ => self.erasure().internal_name(),
         }
@@ -83,7 +84,7 @@ impl Ty {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TypeParam {
-    pub name: String,
+    pub name: Ustr,
     pub bounds: Vec<Ty>,
 }
 
@@ -99,9 +100,9 @@ impl fmt::Display for Ty {
             Ty::Long => write!(f, "long"),
             Ty::Float => write!(f, "float"),
             Ty::Double => write!(f, "double"),
-            Ty::Class(name) => write!(f, "{}", name.replace('/', ".")),
+            Ty::Class(name) => write!(f, "{}", name.as_str().replace('/', ".")),
             Ty::Array(elem) => write!(f, "{}[]", elem),
-            Ty::TypeVar(name) => write!(f, "{}", name),
+            Ty::TypeVar(name) => write!(f, "{}", name.as_str()),
             Ty::Wildcard(Some(bound)) => write!(f, "? extends {}", bound),
             Ty::Wildcard(None) => write!(f, "?"),
             Ty::Intersection(types) => {

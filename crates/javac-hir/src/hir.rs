@@ -1,6 +1,7 @@
 use javac_ty::{Ty, MethodSig, TypeParam};
 use std::rc::Rc;
 use la_arena::{Arena, Idx};
+use ustr::Ustr;
 
 pub type ExprId = Idx<Expr>;
 pub type StmtId = Idx<Stmt>;
@@ -10,7 +11,7 @@ pub struct HirId(pub u32);
 
 #[derive(Debug, Clone)]
 pub struct Package {
-    pub name: String,
+    pub name: Ustr,
 }
 
 #[derive(Debug, Clone)]
@@ -22,7 +23,7 @@ pub struct CompilationUnit {
 
 #[derive(Debug, Clone)]
 pub struct Import {
-    pub path: String,
+    pub path: Ustr,
     pub is_static: bool,
     pub is_wildcard: bool,
 }
@@ -30,7 +31,7 @@ pub struct Import {
 #[derive(Debug, Clone)]
 pub struct TypeDecl {
     pub id: HirId,
-    pub name: String,
+    pub name: Ustr,
     pub kind: TypeDeclKind,
     pub access_flags: u16,
     pub super_class: Option<Ty>,
@@ -59,7 +60,7 @@ pub struct Body {
 #[derive(Debug, Clone)]
 pub struct FieldDecl {
     pub id: HirId,
-    pub name: String,
+    pub name: Ustr,
     pub ty: Ty,
     pub access_flags: u16,
     pub body: Body,
@@ -69,7 +70,7 @@ pub struct FieldDecl {
 #[derive(Debug, Clone)]
 pub struct MethodDecl {
     pub id: HirId,
-    pub name: String,
+    pub name: Ustr,
     pub signature: MethodSig,
     pub access_flags: u16,
     pub body: Body,
@@ -99,7 +100,7 @@ pub enum Stmt {
     },
     ForEach {
         var_type: Ty,
-        var_name: String,
+        var_name: Ustr,
         iterable: ExprId,
         body: StmtId,
     },
@@ -113,8 +114,8 @@ pub enum Stmt {
     },
     Return(Option<ExprId>),
     Throw(ExprId),
-    Break(Option<String>),
-    Continue(Option<String>),
+    Break(Option<Ustr>),
+    Continue(Option<Ustr>),
     Try(TryStmt),
     Synchronized(ExprId, Block),
     Assert {
@@ -128,7 +129,7 @@ pub enum Stmt {
 #[derive(Debug, Clone)]
 pub struct LocalVarDecl {
     pub ty: Ty,
-    pub name: String,
+    pub name: Ustr,
     pub initializer: Option<ExprId>,
 }
 
@@ -156,7 +157,7 @@ pub struct TryStmt {
 #[derive(Debug, Clone)]
 pub struct CatchClause {
     pub exception_type: Ty,
-    pub var_name: String,
+    pub var_name: Ustr,
     pub body: Block,
 }
 
@@ -168,21 +169,21 @@ pub enum Expr {
     DoubleLiteral(f64),
     BoolLiteral(bool),
     CharLiteral(char),
-    StringLiteral(String),
+    StringLiteral(Ustr),
     NullLiteral,
     This,
     Super,
 
-    Ident(String),
+    Ident(Ustr),
 
     FieldAccess {
         target: ExprId,
-        field: String,
+        field: Ustr,
     },
 
     MethodCall {
         target: Option<ExprId>,
-        method: String,
+        method: Ustr,
         args: Vec<ExprId>,
     },
 
@@ -245,7 +246,7 @@ pub enum Expr {
 
     MethodRef {
         target: ExprId,
-        method: String,
+        method: Ustr,
     },
 
     Parens(ExprId),
@@ -283,7 +284,7 @@ pub enum AssignOp {
 #[derive(Debug, Clone)]
 pub struct LambdaParam {
     pub ty: Option<Ty>,
-    pub name: String,
+    pub name: Ustr,
 }
 
 #[derive(Debug, Clone)]

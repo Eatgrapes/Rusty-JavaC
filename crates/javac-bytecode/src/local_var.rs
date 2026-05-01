@@ -1,11 +1,4 @@
 use javac_ty::Ty;
-use crate::codegen::CodegenCtx;
-
-impl CodegenCtx<'_> {
-    pub fn local_ty(&self, name: &str) -> Option<Ty> {
-        self.resolve_local_ty(name)
-    }
-}
 
 pub fn store_opcode(ty: &Ty) -> u8 {
     use rust_asm::opcodes;

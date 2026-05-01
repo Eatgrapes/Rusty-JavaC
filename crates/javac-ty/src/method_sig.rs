@@ -1,8 +1,9 @@
 use crate::ty::{Ty, TypeParam};
+use ustr::Ustr;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MethodSig {
-    pub name: String,
+    pub name: Ustr,
     pub params: Vec<Ty>,
     pub return_type: Ty,
     pub type_params: Vec<TypeParam>,
@@ -11,13 +12,13 @@ pub struct MethodSig {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FieldSig {
-    pub name: String,
+    pub name: Ustr,
     pub ty: Ty,
     pub access_flags: u16,
 }
 
 impl MethodSig {
-    pub fn new(name: String, params: Vec<Ty>, return_type: Ty) -> Self {
+    pub fn new(name: Ustr, params: Vec<Ty>, return_type: Ty) -> Self {
         Self {
             name,
             params,

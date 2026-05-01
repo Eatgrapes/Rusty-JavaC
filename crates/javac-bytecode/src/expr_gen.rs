@@ -26,8 +26,8 @@ pub fn gen_expr(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, expr_i
         Expr::CharLiteral(c) => gen_int_const(mw, *c as i64),
         Expr::This => mw.visit_var_insn(opcodes::ALOAD, 0),
         Expr::Ident(name) => {
-            if let Some(slot) = ctx.get_local(name) {
-                if let Some(ty) = ctx.local_ty(name) {
+            if let Some(slot) = ctx.get_local(*name) {
+                if let Some(ty) = ctx.local_ty(*name) {
                     mw.visit_var_insn(load_opcode(&ty), slot);
                 }
             }

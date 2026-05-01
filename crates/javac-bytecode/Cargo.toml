@@ -9,3 +9,4 @@ javac-hir = { path = "../javac-hir" }
 javac-classfile = { path = "../javac-classfile" }
 javac-ty = { path = "../javac-ty" }
 rust-asm = { workspace = true }
+ustr = "1.1.0"

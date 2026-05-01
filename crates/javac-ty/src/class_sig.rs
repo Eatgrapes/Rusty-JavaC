@@ -1,8 +1,9 @@
 use crate::ty::{Ty, TypeParam};
+use ustr::Ustr;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ClassSig {
-    pub name: String,
+    pub name: Ustr,
     pub super_class: Option<Ty>,
     pub interfaces: Vec<Ty>,
     pub type_params: Vec<TypeParam>,
@@ -10,7 +11,7 @@ pub struct ClassSig {
 }
 
 impl ClassSig {
-    pub fn new(name: String) -> Self {
+    pub fn new(name: Ustr) -> Self {
         Self {
             name,
             super_class: None,
@@ -21,7 +22,7 @@ impl ClassSig {
     }
 
     pub fn internal_name(&self) -> String {
-        self.name.replace('.', "/")
+        self.name.as_str().replace('.', "/")
     }
 
     pub fn super_descriptor(&self) -> String {
