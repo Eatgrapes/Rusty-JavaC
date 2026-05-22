@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 javac-hir = { path = "../javac-hir" }
 javac-classfile = { path = "../javac-classfile" }
+javac-call-resolver = { path = "../javac-call-resolver" }
 javac-ty = { path = "../javac-ty" }
 rust-asm = { workspace = true }
 ustr = "1.1.0"
