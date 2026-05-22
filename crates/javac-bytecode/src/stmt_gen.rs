@@ -1,30 +1,27 @@
-use javac_classfile::MethodWriter;
-use rust_asm::opcodes;
 use crate::codegen::CodegenCtx;
+use javac_classfile::Label;
+use javac_classfile::MethodWriter;
 use javac_hir::hir::*;
 use javac_ty::Ty;
+use rust_asm::opcodes;
 
 pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_id: StmtId) {
     let stmt = &body.stmts[stmt_id];
     match stmt {
         Stmt::Return(Some(expr_id)) => {
             crate::expr_gen::gen_expr(mw, ctx, body, *expr_id);
-            let ty = body.exprs[*expr_id].ty(&body.exprs);
-            mw.visit_insn(return_opcode(&ty));
+            let expr_ty = crate::expr_gen::expr_ty(ctx, body, *expr_id);
+            let return_ty = ctx.return_ty.clone();
+            crate::expr_gen::coerce(mw, &expr_ty, &return_ty);
+            mw.visit_insn(return_opcode(&return_ty));
         }
         Stmt::Return(None) => {
             mw.visit_insn(opcodes::RETURN);
         }
         Stmt::Expr(expr_id) => {
             crate::expr_gen::gen_expr(mw, ctx, body, *expr_id);
-            let ty = body.exprs[*expr_id].ty(&body.exprs);
-            if !matches!(ty, Ty::Void) {
-                if ty.size() == 2 {
-                    mw.visit_insn(opcodes::POP2);
-                } else {
-                    mw.visit_insn(opcodes::POP);
-                }
-            }
+            let ty = crate::expr_gen::expr_ty(ctx, body, *expr_id);
+            crate::expr_gen::pop_ty(mw, &ty);
         }
         Stmt::Empty => {}
         Stmt::Block(block) => {
@@ -33,28 +30,116 @@ pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_i
             }
         }
         Stmt::LocalVar(var) => {
+            let slot = ctx.alloc_local(var.name, var.ty.clone());
             if let Some(init) = &var.initializer {
                 crate::expr_gen::gen_expr(mw, ctx, body, *init);
+                let init_ty = crate::expr_gen::expr_ty(ctx, body, *init);
+                crate::expr_gen::coerce(mw, &init_ty, &var.ty);
+                let store_op = crate::local_var::store_opcode(&var.ty);
+                mw.visit_var_insn(store_op, slot);
             }
-            let slot = ctx.alloc_local(var.name, var.ty.clone());
-            let store_op = crate::local_var::store_opcode(&var.ty);
-            mw.visit_var_insn(store_op, slot);
         }
-        Stmt::If { condition, then_branch, else_branch } => {
+        Stmt::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            let else_label = Label::new();
+            let end_label = Label::new();
+            let then_exits = stmt_definitely_exits(body, *then_branch);
             crate::expr_gen::gen_expr(mw, ctx, body, *condition);
-            // TODO: generate proper branch with labels
+            mw.visit_jump_insn(opcodes::IFEQ, else_label);
             gen_stmt(mw, ctx, body, *then_branch);
+            if !then_exits {
+                mw.visit_jump_insn(opcodes::GOTO, end_label);
+            }
+            mw.visit_label(else_label);
             if let Some(els) = else_branch {
                 gen_stmt(mw, ctx, body, *els);
             }
+            if !then_exits {
+                mw.visit_label(end_label);
+            }
         }
-        Stmt::While { condition, body: loop_body } => {
+        Stmt::While {
+            condition,
+            body: loop_body,
+        } => {
+            let start_label = Label::new();
+            let end_label = Label::new();
+            mw.visit_label(start_label);
             crate::expr_gen::gen_expr(mw, ctx, body, *condition);
+            mw.visit_jump_insn(opcodes::IFEQ, end_label);
+            ctx.continue_labels.push(start_label);
+            ctx.break_labels.push(end_label);
             gen_stmt(mw, ctx, body, *loop_body);
+            ctx.break_labels.pop();
+            ctx.continue_labels.pop();
+            mw.visit_jump_insn(opcodes::GOTO, start_label);
+            mw.visit_label(end_label);
+        }
+        Stmt::Do {
+            body: loop_body,
+            condition,
+        } => {
+            let start_label = Label::new();
+            let continue_label = Label::new();
+            let end_label = Label::new();
+            mw.visit_label(start_label);
+            ctx.continue_labels.push(continue_label);
+            ctx.break_labels.push(end_label);
+            gen_stmt(mw, ctx, body, *loop_body);
+            ctx.break_labels.pop();
+            ctx.continue_labels.pop();
+            mw.visit_label(continue_label);
+            crate::expr_gen::gen_expr(mw, ctx, body, *condition);
+            mw.visit_jump_insn(opcodes::IFNE, start_label);
+            mw.visit_label(end_label);
+        }
+        Stmt::For {
+            init,
+            condition,
+            update,
+            body: loop_body,
+        } => {
+            if let Some(init) = init {
+                gen_stmt(mw, ctx, body, *init);
+            }
+            let start_label = Label::new();
+            let continue_label = Label::new();
+            let end_label = Label::new();
+            mw.visit_label(start_label);
+            if let Some(condition) = condition {
+                crate::expr_gen::gen_expr(mw, ctx, body, *condition);
+                mw.visit_jump_insn(opcodes::IFEQ, end_label);
+            }
+            ctx.continue_labels.push(continue_label);
+            ctx.break_labels.push(end_label);
+            gen_stmt(mw, ctx, body, *loop_body);
+            ctx.break_labels.pop();
+            ctx.continue_labels.pop();
+            mw.visit_label(continue_label);
+            if let Some(update) = update {
+                crate::expr_gen::gen_expr(mw, ctx, body, *update);
+                let update_ty = crate::expr_gen::expr_ty(ctx, body, *update);
+                crate::expr_gen::pop_ty(mw, &update_ty);
+            }
+            mw.visit_jump_insn(opcodes::GOTO, start_label);
+            mw.visit_label(end_label);
         }
         Stmt::Throw(expr_id) => {
             crate::expr_gen::gen_expr(mw, ctx, body, *expr_id);
             mw.visit_insn(opcodes::ATHROW);
+        }
+        Stmt::Break(_) => {
+            if let Some(label) = ctx.break_labels.last() {
+                mw.visit_jump_insn(opcodes::GOTO, *label);
+            }
+        }
+        Stmt::Continue(_) => {
+            if let Some(label) = ctx.continue_labels.last() {
+                mw.visit_jump_insn(opcodes::GOTO, *label);
+            }
         }
         _ => {}
     }
@@ -62,4 +147,21 @@ pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_i
 
 fn return_opcode(ty: &Ty) -> u8 {
     crate::local_var::return_opcode(ty)
+}
+
+fn stmt_definitely_exits(body: &Body, stmt_id: StmtId) -> bool {
+    match &body.stmts[stmt_id] {
+        Stmt::Return(_) | Stmt::Throw(_) => true,
+        Stmt::Block(block) => block
+            .stmts
+            .last()
+            .map(|stmt| stmt_definitely_exits(body, *stmt))
+            .unwrap_or(false),
+        Stmt::If {
+            then_branch,
+            else_branch: Some(else_branch),
+            ..
+        } => stmt_definitely_exits(body, *then_branch) && stmt_definitely_exits(body, *else_branch),
+        _ => false,
+    }
 }

@@ -1,5 +1,8 @@
-use rust_asm::class_writer::{ClassWriter, COMPUTE_FRAMES, MethodVisitor, FieldVisitor};
 use crate::version;
+use rust_asm::class_writer::{
+    COMPUTE_FRAMES, COMPUTE_MAXS, ClassWriter, FieldVisitor, MethodVisitor,
+};
+pub use rust_asm::insn::Label;
 
 pub struct ClassFileWriter {
     cw: ClassWriter,
@@ -8,7 +11,7 @@ pub struct ClassFileWriter {
 impl ClassFileWriter {
     pub fn new() -> Self {
         Self {
-            cw: ClassWriter::new(COMPUTE_FRAMES),
+            cw: ClassWriter::new(COMPUTE_FRAMES | COMPUTE_MAXS),
         }
     }
 
@@ -21,7 +24,8 @@ impl ClassFileWriter {
         interfaces: &[&str],
     ) {
         let major = version::version_for_java(java_version);
-        self.cw.visit(major, 0, access_flags, name, super_name, interfaces);
+        self.cw
+            .visit(major, 0, access_flags, name, super_name, interfaces);
     }
 
     pub fn visit_method(
@@ -34,12 +38,7 @@ impl ClassFileWriter {
         MethodWriter { inner: mv }
     }
 
-    pub fn visit_field(
-        &mut self,
-        access_flags: u16,
-        name: &str,
-        descriptor: &str,
-    ) -> FieldWriter {
+    pub fn visit_field(&mut self, access_flags: u16, name: &str, descriptor: &str) -> FieldWriter {
         let fv = self.cw.visit_field(access_flags, name, descriptor);
         FieldWriter { inner: fv }
     }
@@ -70,6 +69,14 @@ impl MethodWriter {
         self.inner.visit_type_insn(opcode, type_name);
     }
 
+    pub fn visit_jump_insn(&mut self, opcode: u8, target: Label) {
+        self.inner.visit_jump_insn(opcode, target);
+    }
+
+    pub fn visit_label(&mut self, label: Label) {
+        self.inner.visit_label(label);
+    }
+
     pub fn visit_field_insn(&mut self, opcode: u8, owner: &str, name: &str, descriptor: &str) {
         self.inner.visit_field_insn(opcode, owner, name, descriptor);
     }
@@ -82,33 +89,40 @@ impl MethodWriter {
         descriptor: &str,
         is_interface: bool,
     ) {
-        self.inner.visit_method_insn(opcode, owner, name, descriptor, is_interface);
+        self.inner
+            .visit_method_insn(opcode, owner, name, descriptor, is_interface);
     }
 
     pub fn visit_ldc_insn_int(&mut self, value: i32) {
-        self.inner.visit_ldc_insn(rust_asm::insn::LdcInsnNode::int(value));
+        self.inner
+            .visit_ldc_insn(rust_asm::insn::LdcInsnNode::int(value));
     }
 
     pub fn visit_ldc_insn_float(&mut self, value: f32) {
-        self.inner.visit_ldc_insn(rust_asm::insn::LdcInsnNode::float(value));
+        self.inner
+            .visit_ldc_insn(rust_asm::insn::LdcInsnNode::float(value));
     }
 
     pub fn visit_ldc_insn_long(&mut self, value: i64) {
-        self.inner.visit_ldc_insn(rust_asm::insn::LdcInsnNode::long(value));
+        self.inner
+            .visit_ldc_insn(rust_asm::insn::LdcInsnNode::long(value));
     }
 
     pub fn visit_ldc_insn_double(&mut self, value: f64) {
-        self.inner.visit_ldc_insn(rust_asm::insn::LdcInsnNode::double(value));
+        self.inner
+            .visit_ldc_insn(rust_asm::insn::LdcInsnNode::double(value));
     }
 
     pub fn visit_ldc_insn_string(&mut self, value: &str) {
-        self.inner.visit_ldc_insn(rust_asm::insn::LdcInsnNode::string(value));
+        self.inner
+            .visit_ldc_insn(rust_asm::insn::LdcInsnNode::string(value));
     }
 
     pub fn visit_ldc_insn_type(&mut self, type_name: &str) {
-        self.inner.visit_ldc_insn(rust_asm::insn::LdcInsnNode::typed(
-            rust_asm::types::Type::get_object_type(type_name),
-        ));
+        self.inner
+            .visit_ldc_insn(rust_asm::insn::LdcInsnNode::typed(
+                rust_asm::types::Type::get_object_type(type_name),
+            ));
     }
 
     pub fn visit_iinc_insn(&mut self, var_index: u16, increment: i16) {

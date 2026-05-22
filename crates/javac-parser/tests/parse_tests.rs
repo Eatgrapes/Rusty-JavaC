@@ -1,64 +1,96 @@
-use javac_ast::JavaLanguage;
+use javac_ast::{JavaLanguage, JavaSyntaxKind};
 use javac_parser::{Parse, Parser};
 use rowan::SyntaxNode;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
-fn parse_file(name: &str) -> Parse {
-    let path = format!("tests/java/{}", name);
-    let source = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("failed to read {}: {}", path, e));
-    Parser::parse(&source)
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
 }
 
-fn assert_no_errors(parse: &Parse, file: &str) {
+fn fixtures_dir() -> PathBuf {
+    workspace_root().join("tests").join("java")
+}
+
+fn java_fixtures() -> Vec<PathBuf> {
+    let mut fixtures = std::fs::read_dir(fixtures_dir())
+        .expect("failed to read root tests/java directory")
+        .map(|entry| entry.expect("failed to read java fixture entry").path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "java"))
+        .collect::<Vec<_>>();
+    fixtures.sort();
+    assert!(!fixtures.is_empty(), "expected at least one Java fixture");
+    fixtures
+}
+
+fn assert_no_errors(parse: &Parse, file: &Path) {
     if !parse.errors.is_empty() {
-        let msgs: Vec<String> = parse.errors.iter()
+        let msgs: Vec<String> = parse
+            .errors
+            .iter()
             .map(|e| format!("  offset {}: {}", e.offset, e.message))
             .collect();
-        panic!("parse errors in {}:\n{}", file, msgs.join("\n"));
+        panic!("parse errors in {}:\n{}", file.display(), msgs.join("\n"));
     }
 }
 
 #[test]
-fn parse_hello_world() {
-    let parse = parse_file("HelloWorld.java");
-    assert_no_errors(&parse, "HelloWorld.java");
+fn parse_all_java_fixtures() {
+    for path in java_fixtures() {
+        let source = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {}", path.display(), e));
+        let parse = Parser::parse(&source);
+        assert_no_errors(&parse, &path);
+    }
 }
 
 #[test]
-fn parse_basic_types() {
-    let parse = parse_file("BasicTypes.java");
-    assert_no_errors(&parse, "BasicTypes.java");
+fn parser_builds_green_tree_for_all_java_fixtures() {
+    for path in java_fixtures() {
+        let source = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {}", path.display(), e));
+        let parse = Parser::parse(&source);
+        assert_no_errors(&parse, &path);
+        let root = SyntaxNode::<JavaLanguage>::new_root(parse.green_node);
+        assert_eq!(root.kind(), JavaSyntaxKind::CompilationUnit);
+        assert!(
+            !root.text().to_string().is_empty(),
+            "green tree should contain parsed tokens for {}",
+            path.display()
+        );
+    }
 }
 
 #[test]
-fn parse_control_flow() {
-    let parse = parse_file("ControlFlow.java");
-    assert_no_errors(&parse, "ControlFlow.java");
-}
+fn javac_accepts_all_java_fixtures() {
+    let output_root = workspace_root().join("target").join("java-fixture-classes");
+    std::fs::create_dir_all(&output_root)
+        .unwrap_or_else(|e| panic!("failed to create {}: {}", output_root.display(), e));
 
-#[test]
-fn parse_classes() {
-    let parse = parse_file("Classes.java");
-    assert_no_errors(&parse, "Classes.java");
-}
+    for path in java_fixtures() {
+        let fixture_output = output_root.join(
+            path.file_stem()
+                .expect("java fixture should have a file stem"),
+        );
+        let _ = std::fs::remove_dir_all(&fixture_output);
+        std::fs::create_dir_all(&fixture_output)
+            .unwrap_or_else(|e| panic!("failed to create {}: {}", fixture_output.display(), e));
 
-#[test]
-fn parse_java21_features() {
-    let parse = parse_file("Java21Features.java");
-    assert_no_errors(&parse, "Java21Features.java");
-}
+        let output = Command::new("javac")
+            .arg("--release")
+            .arg("21")
+            .arg("-d")
+            .arg(&fixture_output)
+            .arg(&path)
+            .output()
+            .unwrap_or_else(|e| panic!("failed to run javac for {}: {}", path.display(), e));
 
-#[test]
-fn parse_expressions() {
-    let parse = parse_file("Expressions.java");
-    assert_no_errors(&parse, "Expressions.java");
-}
-
-#[test]
-fn parse_produces_green_tree() {
-    let parse = parse_file("HelloWorld.java");
-    let root = SyntaxNode::<JavaLanguage>::new_root(parse.green_node);
-    let text = root.text().to_string();
-    assert!(text.contains("Hello"), "green tree should contain source text");
-    assert!(text.contains("World"), "green tree should contain source text");
+        assert!(
+            output.status.success(),
+            "javac failed for {}\nstdout:\n{}\nstderr:\n{}",
+            path.display(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
 }
