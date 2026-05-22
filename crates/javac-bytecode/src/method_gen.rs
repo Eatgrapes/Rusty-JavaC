@@ -1,8 +1,9 @@
 use crate::codegen::CodegenCtx;
+use crate::expr_gen::push_default_value;
+use crate::local_var::return_opcode;
 use javac_classfile::MethodWriter;
 use javac_hir::hir::*;
 use javac_ty::Ty;
-use rust_asm::opcodes;
 
 pub fn gen_method_body(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, block: &Block) {
     for stmt_id in &block.stmts {
@@ -35,27 +36,6 @@ fn stmt_definitely_exits(body: &Body, stmt_id: StmtId) -> bool {
 }
 
 fn emit_default_return(mw: &mut MethodWriter, ty: &Ty) {
-    match ty {
-        Ty::Void => mw.visit_insn(opcodes::RETURN),
-        Ty::Long => {
-            mw.visit_insn(opcodes::LCONST_0);
-            mw.visit_insn(opcodes::LRETURN);
-        }
-        Ty::Float => {
-            mw.visit_insn(opcodes::FCONST_0);
-            mw.visit_insn(opcodes::FRETURN);
-        }
-        Ty::Double => {
-            mw.visit_insn(opcodes::DCONST_0);
-            mw.visit_insn(opcodes::DRETURN);
-        }
-        Ty::Class(_) | Ty::Array(_) | Ty::TypeVar(_) | Ty::Wildcard(_) | Ty::Intersection(_) => {
-            mw.visit_insn(opcodes::ACONST_NULL);
-            mw.visit_insn(opcodes::ARETURN);
-        }
-        _ => {
-            mw.visit_insn(opcodes::ICONST_0);
-            mw.visit_insn(opcodes::IRETURN);
-        }
-    }
+    push_default_value(mw, ty);
+    mw.visit_insn(return_opcode(ty));
 }

@@ -10,7 +10,6 @@ pub struct FieldRef {
     pub name: &'static str,
     pub descriptor: &'static str,
     pub ty: Ty,
-    pub is_static: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,6 +20,12 @@ pub struct MethodRef {
     pub return_ty: Ty,
     pub opcode: u8,
     pub is_interface: bool,
+}
+
+pub fn resolve_class_name(simple_name: &str) -> Option<&'static str> {
+    system::class_name(simple_name)
+        .or_else(|| java_lang::class_name(simple_name))
+        .or_else(|| javax::class_name(simple_name))
 }
 
 pub fn resolve_static_field(owner: &str, name: &str) -> Option<FieldRef> {

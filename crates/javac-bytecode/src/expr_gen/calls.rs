@@ -7,6 +7,11 @@ use javac_ty::Ty;
 use rust_asm::opcodes;
 use ustr::Ustr;
 
+enum ReceiverStyle {
+    Implicit,
+    ExplicitThis,
+}
+
 pub(super) fn emit_field_access(
     mw: &mut MethodWriter,
     ctx: &CodegenCtx,
@@ -70,9 +75,16 @@ pub(super) fn emit_method_call(
         }
 
         if values::is_current_instance(body, target) {
-            return emit_current_class_call(mw, ctx, body, method, args, true);
+            return emit_current_class_call(
+                mw,
+                ctx,
+                body,
+                method,
+                args,
+                ReceiverStyle::ExplicitThis,
+            );
         }
-    } else if emit_current_class_call(mw, ctx, body, method, args, false) {
+    } else if emit_current_class_call(mw, ctx, body, method, args, ReceiverStyle::Implicit) {
         return true;
     }
 
@@ -110,7 +122,7 @@ fn emit_current_class_call(
     body: &Body,
     method: Ustr,
     args: &[ExprId],
-    explicit_target: bool,
+    receiver_style: ReceiverStyle,
 ) -> bool {
     let Some(sig) = ctx.method_sig(method) else {
         return false;
@@ -119,7 +131,7 @@ fn emit_current_class_call(
     let is_static = sig.access_flags & javac_classfile::ACC_STATIC != 0;
     if !is_static {
         mw.visit_var_insn(opcodes::ALOAD, 0);
-    } else if explicit_target {
+    } else if matches!(receiver_style, ReceiverStyle::ExplicitThis) {
         return false;
     }
 
