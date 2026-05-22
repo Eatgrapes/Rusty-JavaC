@@ -1,0 +1,10 @@
+[package]
+name = "javac-call-resolver"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+javac-ty = { path = "../javac-ty" }
+rust-asm = { workspace = true }
+ustr = "1.1.0"
