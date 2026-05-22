@@ -1,6 +1,6 @@
 use crate::codegen::CodegenCtx;
 use crate::expr_gen::convert::pop_ty;
-use crate::expr_gen::{discard_expr, expr_ty, gen_expr, is_string};
+use crate::expr_gen::{expr_ty, gen_expr, is_string};
 use javac_classfile::{Label, MethodWriter};
 use javac_hir::hir::*;
 use javac_ty::Ty;
@@ -26,9 +26,7 @@ pub(super) fn emit_binary(
             emit_comparison(mw, &op, &left_ty);
         }
         BinaryOp::Add if is_string(&left_ty) || is_string(&right_ty) => {
-            discard_expr(mw, ctx, body, left);
-            discard_expr(mw, ctx, body, right);
-            mw.visit_ldc_insn_string("");
+            emit_string_concat(mw, ctx, body, left, right);
         }
         _ => {
             gen_expr(mw, ctx, body, left);
@@ -36,6 +34,75 @@ pub(super) fn emit_binary(
             emit_arithmetic(mw, &op, &left_ty);
         }
     }
+}
+
+fn emit_string_concat(
+    mw: &mut MethodWriter,
+    ctx: &mut CodegenCtx,
+    body: &Body,
+    left: ExprId,
+    right: ExprId,
+) {
+    mw.visit_type_insn(opcodes::NEW, "java/lang/StringBuilder");
+    mw.visit_insn(opcodes::DUP);
+    mw.visit_method_insn(
+        opcodes::INVOKESPECIAL,
+        "java/lang/StringBuilder",
+        "<init>",
+        "()V",
+        false,
+    );
+    append_string_part(mw, ctx, body, left);
+    append_string_part(mw, ctx, body, right);
+    mw.visit_method_insn(
+        opcodes::INVOKEVIRTUAL,
+        "java/lang/StringBuilder",
+        "toString",
+        "()Ljava/lang/String;",
+        false,
+    );
+}
+
+fn append_string_part(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, expr_id: ExprId) {
+    if let Expr::Binary {
+        op: BinaryOp::Add,
+        left,
+        right,
+    } = &body.exprs[expr_id]
+    {
+        let left_ty = expr_ty(ctx, body, *left);
+        let right_ty = expr_ty(ctx, body, *right);
+        if is_string(&left_ty) || is_string(&right_ty) {
+            append_string_part(mw, ctx, body, *left);
+            append_string_part(mw, ctx, body, *right);
+            return;
+        }
+    }
+
+    gen_expr(mw, ctx, body, expr_id);
+    let ty = expr_ty(ctx, body, expr_id);
+    mw.visit_method_insn(
+        opcodes::INVOKEVIRTUAL,
+        "java/lang/StringBuilder",
+        "append",
+        &string_builder_append_descriptor(&ty),
+        false,
+    );
+}
+
+fn string_builder_append_descriptor(ty: &Ty) -> String {
+    let arg = match ty.erasure() {
+        Ty::Boolean => "Z".to_string(),
+        Ty::Char => "C".to_string(),
+        Ty::Int | Ty::Byte | Ty::Short => "I".to_string(),
+        Ty::Long => "J".to_string(),
+        Ty::Float => "F".to_string(),
+        Ty::Double => "D".to_string(),
+        Ty::Class(name) if name.as_str() == "java/lang/String" => "Ljava/lang/String;".to_string(),
+        Ty::Class(_) | Ty::Array(_) => "Ljava/lang/Object;".to_string(),
+        _ => "Ljava/lang/Object;".to_string(),
+    };
+    format!("({arg})Ljava/lang/StringBuilder;")
 }
 
 pub(super) fn emit_unary(
