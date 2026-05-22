@@ -1,0 +1,71 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: Build workspace
+        run: cargo build --workspace --locked
+
+      - name: Test workspace
+        run: cargo test --workspace --locked
+
+      - name: Verify compiler example
+        shell: bash
+        run: |
+          mkdir -p target/ci-input target/compiler-example
+          printf 'public class DemoApp {}\n' > target/ci-input/DemoApp.java
+
+          cargo run --locked -p compiler-example -- \
+            target/ci-input/DemoApp.java \
+            target/compiler-example
+
+          javap -v -c target/compiler-example/DemoApp.class
+
+          cat > target/compiler-example/LoadDemoApp.java <<'JAVA'
+          public class LoadDemoApp {
+              public static void main(String[] args) throws Exception {
+                  Class.forName("DemoApp");
+              }
+          }
+          JAVA
+
+          javac -cp target/compiler-example \
+            -d target/compiler-example \
+            target/compiler-example/LoadDemoApp.java
+
+          java -Xverify:all -cp target/compiler-example LoadDemoApp
