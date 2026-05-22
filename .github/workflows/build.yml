@@ -4,7 +4,13 @@ on:
   push:
     branches:
       - master
+    paths:
+      - "**/*.rs"
+      - "**/*.toml"
   pull_request:
+    paths:
+      - "**/*.rs"
+      - "**/*.toml"
   workflow_dispatch:
 
 env:
