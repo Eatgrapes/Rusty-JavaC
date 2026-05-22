@@ -42,6 +42,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
+name = "compiler-example"
+version = "0.1.0"
+dependencies = [
+ "javac-compiler",
+]
+
+[[package]]
 name = "countme"
 version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -70,8 +77,18 @@ dependencies = [
 name = "javac-bytecode"
 version = "0.1.0"
 dependencies = [
+ "javac-call-resolver",
  "javac-classfile",
  "javac-hir",
+ "javac-ty",
+ "rust-asm",
+ "ustr",
+]
+
+[[package]]
+name = "javac-call-resolver"
+version = "0.1.0"
+dependencies = [
  "javac-ty",
  "rust-asm",
  "ustr",

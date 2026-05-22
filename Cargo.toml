@@ -5,10 +5,12 @@ members = [
     "crates/javac-parser",
     "crates/javac-hir",
     "crates/javac-ty",
+    "crates/javac-call-resolver",
     "crates/javac-bytecode",
     "crates/javac-classfile",
     "crates/javac-diagnostics",
     "crates/javac-compiler",
+    "examples/compiler-example",
 ]
 resolver = "3"
 
