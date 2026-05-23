@@ -1,5 +1,6 @@
 mod arrays;
 mod assign;
+pub(crate) mod branch;
 mod calls;
 mod convert;
 mod literals;

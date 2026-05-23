@@ -51,8 +51,7 @@ pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_i
             let end_label = Label::new();
             let then_exits = stmt_definitely_exits(body, *then_branch);
             let pattern_binding = pattern_binding(body, *condition);
-            crate::expr_gen::gen_expr(mw, ctx, body, *condition);
-            mw.visit_jump_insn(opcodes::IFEQ, else_label);
+            crate::expr_gen::branch::emit_jump_if_false(mw, ctx, body, *condition, else_label);
             if let Some(binding) = pattern_binding {
                 emit_pattern_binding(mw, ctx, body, binding);
             }
@@ -75,8 +74,7 @@ pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_i
             let start_label = Label::new();
             let end_label = Label::new();
             mw.visit_label(start_label);
-            crate::expr_gen::gen_expr(mw, ctx, body, *condition);
-            mw.visit_jump_insn(opcodes::IFEQ, end_label);
+            crate::expr_gen::branch::emit_jump_if_false(mw, ctx, body, *condition, end_label);
             ctx.continue_labels.push(start_label);
             ctx.break_labels.push(end_label);
             gen_stmt(mw, ctx, body, *loop_body);
@@ -101,8 +99,7 @@ pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_i
             ctx.break_labels.pop();
             ctx.continue_labels.pop();
             mw.visit_label(continue_label);
-            crate::expr_gen::gen_expr(mw, ctx, body, *condition);
-            mw.visit_jump_insn(opcodes::IFNE, start_label);
+            crate::expr_gen::branch::emit_jump_if_true(mw, ctx, body, *condition, start_label);
             mw.visit_label(end_label);
         }
         Stmt::For {
@@ -119,8 +116,7 @@ pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_i
             let end_label = Label::new();
             mw.visit_label(start_label);
             if let Some(condition) = condition {
-                crate::expr_gen::gen_expr(mw, ctx, body, *condition);
-                mw.visit_jump_insn(opcodes::IFEQ, end_label);
+                crate::expr_gen::branch::emit_jump_if_false(mw, ctx, body, *condition, end_label);
             }
             ctx.continue_labels.push(continue_label);
             ctx.break_labels.push(end_label);
