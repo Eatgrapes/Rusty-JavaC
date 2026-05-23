@@ -8,4 +8,5 @@ license.workspace = true
 javac-ast = { path = "../javac-ast" }
 javac-ty = { path = "../javac-ty" }
 la-arena = "0.3.1"
+thiserror = { workspace = true }
 ustr = "1.1.0"

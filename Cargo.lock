@@ -130,6 +130,7 @@ dependencies = [
  "javac-ast",
  "javac-ty",
  "la-arena",
+ "thiserror",
  "ustr",
 ]
 
