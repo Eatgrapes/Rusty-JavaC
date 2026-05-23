@@ -69,6 +69,10 @@ pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_i
             condition,
             body: loop_body,
         } => {
+            if is_true_literal(body, *condition) && stmt_is_plain_break(body, *loop_body) {
+                return;
+            }
+
             let start_label = Label::new();
             let end_label = Label::new();
             mw.visit_label(start_label);
@@ -87,6 +91,10 @@ pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_i
             body: loop_body,
             condition,
         } => {
+            if is_false_literal(body, *condition) && stmt_is_plain_continue(body, *loop_body) {
+                return;
+            }
+
             let start_label = Label::new();
             let continue_label = Label::new();
             let end_label = Label::new();
@@ -531,6 +539,32 @@ fn stmt_definitely_exits(body: &Body, stmt_id: StmtId) -> bool {
                 .map(|stmt| stmt_definitely_exits(body, *stmt))
                 .unwrap_or(false),
         }),
+        _ => false,
+    }
+}
+
+fn is_true_literal(body: &Body, expr_id: ExprId) -> bool {
+    matches!(body.exprs[expr_id], Expr::BoolLiteral(true))
+}
+
+fn is_false_literal(body: &Body, expr_id: ExprId) -> bool {
+    matches!(body.exprs[expr_id], Expr::BoolLiteral(false))
+}
+
+fn stmt_is_plain_break(body: &Body, stmt_id: StmtId) -> bool {
+    match &body.stmts[stmt_id] {
+        Stmt::Break(None) => true,
+        Stmt::Block(block) => block.stmts.len() == 1 && stmt_is_plain_break(body, block.stmts[0]),
+        _ => false,
+    }
+}
+
+fn stmt_is_plain_continue(body: &Body, stmt_id: StmtId) -> bool {
+    match &body.stmts[stmt_id] {
+        Stmt::Continue(None) => true,
+        Stmt::Block(block) => {
+            block.stmts.len() == 1 && stmt_is_plain_continue(body, block.stmts[0])
+        }
         _ => false,
     }
 }
