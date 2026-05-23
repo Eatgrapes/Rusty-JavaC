@@ -103,58 +103,15 @@ pub(crate) fn cast_or_postfix_expr(p: &mut Parser) {
     postfix_suffix(p);
 }
 
-pub(crate) fn is_cast(p: &mut Parser) -> bool {
+pub(crate) fn is_cast(p: &Parser) -> bool {
     use JavaSyntaxKind::*;
-    if !p.at(LParen) {
+    let mut la = p.lookahead();
+    if !la.eat(LParen) {
         return false;
     }
-    let mut i = p.pos + 1;
-    let primitives = [
-        IntKw, LongKw, ShortKw, ByteKw, CharKw, FloatKw, DoubleKw, BooleanKw,
-    ];
-    if i < p.tokens.len() && primitives.contains(&p.tokens[i].kind) {
-        i += 1;
-        while i + 1 < p.tokens.len() && p.tokens[i].kind == LBrack && p.tokens[i + 1].kind == RBrack
-        {
-            i += 2;
-        }
-        return i < p.tokens.len() && p.tokens[i].kind == RParen;
-    }
-    if i < p.tokens.len() && p.tokens[i].kind == Ident {
-        while i < p.tokens.len() && p.tokens[i].kind == Ident {
-            i += 1;
-            if i < p.tokens.len() && p.tokens[i].kind == Lt {
-                let mut depth = 0;
-                while i < p.tokens.len() {
-                    match p.tokens[i].kind {
-                        Lt => depth += 1,
-                        Gt => {
-                            depth -= 1;
-                            if depth == 0 {
-                                i += 1;
-                                break;
-                            }
-                        }
-                        _ => {}
-                    }
-                    i += 1;
-                }
-            }
-            if i < p.tokens.len() && p.tokens[i].kind == Dot {
-                i += 1;
-            } else {
-                break;
-            }
-        }
-        while i + 1 < p.tokens.len() && p.tokens[i].kind == LBrack && p.tokens[i + 1].kind == RBrack
-        {
-            i += 2;
-        }
-        if i < p.tokens.len() && p.tokens[i].kind == RParen {
-            return true;
-        }
-    }
-    false
+    la.skip_type();
+    la.skip_array_dims();
+    la.at(RParen)
 }
 
 pub(crate) fn postfix_suffix(p: &mut Parser) {

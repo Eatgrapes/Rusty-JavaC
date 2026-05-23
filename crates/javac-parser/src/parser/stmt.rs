@@ -75,22 +75,23 @@ pub(crate) fn for_stmt(p: &mut Parser) {
     m.complete(p, ForStmt);
 }
 
-pub(crate) fn is_foreach(p: &mut Parser) -> bool {
-    let mut i = p.pos;
-    let mut depth = 1i32;
-    while i < p.tokens.len() {
-        match p.tokens[i].kind {
-            JavaSyntaxKind::LParen => depth += 1,
-            JavaSyntaxKind::RParen => {
+pub(crate) fn is_foreach(p: &Parser) -> bool {
+    use JavaSyntaxKind::*;
+    let mut la = p.lookahead();
+    let mut depth = 1usize;
+    while la.kind() != Error {
+        match la.kind() {
+            LParen => depth += 1,
+            RParen => {
                 depth -= 1;
                 if depth == 0 {
                     return false;
                 }
             }
-            JavaSyntaxKind::Colon if depth == 1 => return true,
+            Colon if depth == 1 => return true,
             _ => {}
         }
-        i += 1;
+        la.advance();
     }
     false
 }
@@ -362,36 +363,10 @@ pub(crate) fn is_local_var_decl(p: &Parser) -> bool {
     if !p.at(Ident) {
         return false;
     }
-    let mut i = p.pos;
-    while i < p.tokens.len() && p.tokens[i].kind == Ident {
-        i += 1;
-        if i < p.tokens.len() && p.tokens[i].kind == Lt {
-            let mut depth = 0;
-            while i < p.tokens.len() {
-                match p.tokens[i].kind {
-                    Lt => depth += 1,
-                    Gt => {
-                        depth -= 1;
-                        if depth == 0 {
-                            i += 1;
-                            break;
-                        }
-                    }
-                    _ => {}
-                }
-                i += 1;
-            }
-        }
-        if i < p.tokens.len() && p.tokens[i].kind == Dot {
-            i += 1;
-        } else {
-            break;
-        }
-    }
-    while i + 1 < p.tokens.len() && p.tokens[i].kind == LBrack && p.tokens[i + 1].kind == RBrack {
-        i += 2;
-    }
-    i < p.tokens.len() && p.tokens[i].kind == Ident
+    let mut la = p.lookahead();
+    la.skip_type();
+    la.skip_array_dims();
+    la.at(Ident)
 }
 
 pub(crate) fn local_var_decl(p: &mut Parser) {

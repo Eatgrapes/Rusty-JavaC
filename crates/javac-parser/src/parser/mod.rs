@@ -151,3 +151,101 @@ impl Marker {
 
     pub(crate) fn abandon(self, _p: &mut Parser) {}
 }
+
+pub(crate) struct Lookahead<'a> {
+    tokens: &'a [Token],
+    pos: usize,
+}
+
+impl<'a> Lookahead<'a> {
+    pub(crate) fn at(&self, kind: JavaSyntaxKind) -> bool {
+        self.kind() == kind
+    }
+
+    pub(crate) fn kind(&self) -> JavaSyntaxKind {
+        self.tokens
+            .get(self.pos)
+            .map(|t| t.kind)
+            .unwrap_or(JavaSyntaxKind::Error)
+    }
+
+    pub(crate) fn at_any(&self, ks: &[JavaSyntaxKind]) -> bool {
+        ks.contains(&self.kind())
+    }
+
+    pub(crate) fn advance(&mut self) {
+        if self.pos < self.tokens.len() {
+            self.pos += 1;
+        }
+    }
+
+    pub(crate) fn eat(&mut self, kind: JavaSyntaxKind) -> bool {
+        if self.at(kind) {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn skip_balanced(&mut self, open: JavaSyntaxKind, close: JavaSyntaxKind) {
+        if !self.eat(open) {
+            return;
+        }
+        let mut depth = 1usize;
+        while depth > 0 && self.pos < self.tokens.len() {
+            if self.at(open) {
+                depth += 1;
+            } else if self.at(close) {
+                depth -= 1;
+            }
+            self.advance();
+        }
+    }
+
+    pub(crate) fn skip_annotations(&mut self) {
+        use JavaSyntaxKind::*;
+        while self.eat(At) {
+            self.eat(Ident);
+            self.skip_balanced(LParen, RParen);
+        }
+    }
+
+    pub(crate) fn skip_type(&mut self) {
+        use JavaSyntaxKind::*;
+        let primitives = [
+            IntKw, LongKw, ShortKw, ByteKw, CharKw, FloatKw, DoubleKw, BooleanKw, VoidKw,
+        ];
+        if self.at_any(&primitives) {
+            self.advance();
+        } else {
+            while self.eat(Ident) {
+                self.skip_balanced(Lt, Gt);
+                if !self.eat(Dot) {
+                    break;
+                }
+            }
+        }
+    }
+
+    pub(crate) fn skip_array_dims(&mut self) {
+        use JavaSyntaxKind::*;
+        while self.at(LBrack)
+            && self
+                .tokens
+                .get(self.pos + 1)
+                .is_some_and(|t| t.kind == RBrack)
+        {
+            self.pos += 2;
+        }
+    }
+}
+
+impl Parser {
+    pub(crate) fn lookahead(&self) -> Lookahead<'_> {
+        Lookahead {
+            tokens: &self.tokens,
+            pos: self.pos,
+        }
+    }
+}
