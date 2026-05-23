@@ -1,17 +1,27 @@
 use crate::version;
+use rust_asm::class_reader::{AttributeInfo, LocalVariable, read_class_file};
 use rust_asm::class_writer::{
-    COMPUTE_FRAMES, COMPUTE_MAXS, ClassWriter, FieldVisitor, MethodVisitor,
+    COMPUTE_FRAMES, COMPUTE_MAXS, ClassWriter as AsmClassWriter, FieldVisitor, MethodVisitor,
 };
+use rust_asm::constant_pool::{ConstantPoolBuilder, CpInfo};
 pub use rust_asm::insn::Label;
+use rust_asm::insn::LabelNode;
+use std::collections::HashMap;
 
 pub struct ClassFileWriter {
-    cw: ClassWriter,
+    cw: AsmClassWriter,
+    class_signature: Option<String>,
+    method_metadata: Vec<MethodMetadata>,
+    field_metadata: Vec<FieldMetadata>,
 }
 
 impl ClassFileWriter {
     pub fn new() -> Self {
         Self {
-            cw: ClassWriter::new(COMPUTE_FRAMES | COMPUTE_MAXS),
+            cw: AsmClassWriter::new(COMPUTE_FRAMES | COMPUTE_MAXS),
+            class_signature: None,
+            method_metadata: Vec::new(),
+            field_metadata: Vec::new(),
         }
     }
 
@@ -35,21 +45,55 @@ impl ClassFileWriter {
         descriptor: &str,
     ) -> MethodWriter {
         let mv = self.cw.visit_method(access_flags, name, descriptor);
-        MethodWriter { inner: mv }
+        MethodWriter {
+            inner: mv,
+            name: name.to_string(),
+            descriptor: descriptor.to_string(),
+            signature: None,
+            local_variables: Vec::new(),
+        }
     }
 
     pub fn visit_field(&mut self, access_flags: u16, name: &str, descriptor: &str) -> FieldWriter {
         let fv = self.cw.visit_field(access_flags, name, descriptor);
-        FieldWriter { inner: fv }
+        FieldWriter {
+            inner: fv,
+            name: name.to_string(),
+            descriptor: descriptor.to_string(),
+            signature: None,
+        }
+    }
+
+    pub fn visit_signature(&mut self, signature: &str) {
+        self.class_signature = Some(signature.to_string());
     }
 
     pub fn to_bytes(self) -> Result<Vec<u8>, String> {
-        self.cw.to_bytes().map_err(|e| format!("{:?}", e))
+        let mut class_node = self.cw.to_class_node().map_err(|e| e.to_string())?;
+        add_signatures(
+            &mut class_node,
+            self.class_signature.as_deref(),
+            &self.field_metadata,
+            &self.method_metadata,
+        );
+
+        let first_pass =
+            AsmClassWriter::write_class_node(&class_node, COMPUTE_FRAMES | COMPUTE_MAXS)
+                .map_err(|e| format!("{:?}", e))?;
+        let code_lengths = method_code_lengths(&first_pass)?;
+        add_local_variables(&mut class_node, &self.method_metadata, &code_lengths);
+
+        AsmClassWriter::write_class_node(&class_node, COMPUTE_FRAMES | COMPUTE_MAXS)
+            .map_err(|e| format!("{:?}", e))
     }
 }
 
 pub struct MethodWriter {
     inner: MethodVisitor,
+    name: String,
+    descriptor: String,
+    signature: Option<String>,
+    local_variables: Vec<LocalVariableSpec>,
 }
 
 impl MethodWriter {
@@ -79,6 +123,23 @@ impl MethodWriter {
 
     pub fn visit_label(&mut self, label: Label) {
         self.inner.visit_label(label);
+    }
+
+    pub fn visit_line_number(&mut self, line: u16, label: Label) {
+        self.inner
+            .visit_line_number(line, LabelNode::from_label(label));
+    }
+
+    pub fn visit_local_variable(&mut self, name: &str, descriptor: &str, index: u16) {
+        self.local_variables.push(LocalVariableSpec {
+            name: name.to_string(),
+            descriptor: descriptor.to_string(),
+            index,
+        });
+    }
+
+    pub fn visit_signature(&mut self, signature: &str) {
+        self.signature = Some(signature.to_string());
     }
 
     pub fn visit_field_insn(&mut self, opcode: u8, owner: &str, name: &str, descriptor: &str) {
@@ -138,16 +199,161 @@ impl MethodWriter {
     }
 
     pub fn visit_end(self, cw: &mut ClassFileWriter) {
+        cw.method_metadata.push(MethodMetadata {
+            name: self.name.clone(),
+            descriptor: self.descriptor.clone(),
+            signature: self.signature.clone(),
+            local_variables: self.local_variables.clone(),
+        });
         self.inner.visit_end(&mut cw.cw);
     }
 }
 
 pub struct FieldWriter {
     inner: FieldVisitor,
+    name: String,
+    descriptor: String,
+    signature: Option<String>,
 }
 
 impl FieldWriter {
+    pub fn visit_signature(&mut self, signature: &str) {
+        self.signature = Some(signature.to_string());
+    }
+
     pub fn visit_end(self, cw: &mut ClassFileWriter) {
+        cw.field_metadata.push(FieldMetadata {
+            name: self.name.clone(),
+            descriptor: self.descriptor.clone(),
+            signature: self.signature.clone(),
+        });
         self.inner.visit_end(&mut cw.cw);
+    }
+}
+
+#[derive(Debug, Clone)]
+struct LocalVariableSpec {
+    name: String,
+    descriptor: String,
+    index: u16,
+}
+
+#[derive(Debug, Clone)]
+struct MethodMetadata {
+    name: String,
+    descriptor: String,
+    signature: Option<String>,
+    local_variables: Vec<LocalVariableSpec>,
+}
+
+#[derive(Debug, Clone)]
+struct FieldMetadata {
+    name: String,
+    descriptor: String,
+    signature: Option<String>,
+}
+
+fn add_signatures(
+    class_node: &mut rust_asm::nodes::ClassNode,
+    class_signature: Option<&str>,
+    field_metadata: &[FieldMetadata],
+    method_metadata: &[MethodMetadata],
+) {
+    let mut cp = ConstantPoolBuilder::from_pool(class_node.constant_pool.clone());
+
+    if let Some(signature) = class_signature {
+        add_signature_attribute(&mut class_node.attributes, &mut cp, signature);
+    }
+
+    for (field, metadata) in class_node.fields.iter_mut().zip(field_metadata) {
+        if field.name == metadata.name
+            && field.descriptor == metadata.descriptor
+            && let Some(signature) = metadata.signature.as_deref()
+        {
+            add_signature_attribute(&mut field.attributes, &mut cp, signature);
+        }
+    }
+
+    for (method, metadata) in class_node.methods.iter_mut().zip(method_metadata) {
+        if method.name == metadata.name
+            && method.descriptor == metadata.descriptor
+            && let Some(signature) = metadata.signature.as_deref()
+        {
+            add_signature_attribute(&mut method.attributes, &mut cp, signature);
+        }
+    }
+
+    class_node.constant_pool = cp.into_pool();
+}
+
+fn add_signature_attribute(
+    attributes: &mut Vec<AttributeInfo>,
+    cp: &mut ConstantPoolBuilder,
+    signature: &str,
+) {
+    attributes.retain(|attr| !matches!(attr, AttributeInfo::Signature { .. }));
+    let signature_index = cp.utf8(signature);
+    attributes.push(AttributeInfo::Signature { signature_index });
+}
+
+fn add_local_variables(
+    class_node: &mut rust_asm::nodes::ClassNode,
+    method_metadata: &[MethodMetadata],
+    code_lengths: &HashMap<(String, String), u16>,
+) {
+    let mut cp = ConstantPoolBuilder::from_pool(class_node.constant_pool.clone());
+
+    for (method, metadata) in class_node.methods.iter_mut().zip(method_metadata) {
+        if method.name != metadata.name || method.descriptor != metadata.descriptor {
+            continue;
+        }
+        let Some(length) = code_lengths
+            .get(&(metadata.name.clone(), metadata.descriptor.clone()))
+            .copied()
+            .filter(|length| *length > 0)
+        else {
+            continue;
+        };
+
+        method.local_variables.clear();
+        for variable in &metadata.local_variables {
+            method.local_variables.push(LocalVariable {
+                start_pc: 0,
+                length,
+                name_index: cp.utf8(&variable.name),
+                descriptor_index: cp.utf8(&variable.descriptor),
+                index: variable.index,
+            });
+        }
+    }
+
+    class_node.constant_pool = cp.into_pool();
+}
+
+fn method_code_lengths(bytes: &[u8]) -> Result<HashMap<(String, String), u16>, String> {
+    let class_file = read_class_file(bytes).map_err(|e| format!("{:?}", e))?;
+    let mut lengths = HashMap::new();
+
+    for method in class_file.methods {
+        let name = cp_utf8(&class_file.constant_pool, method.name_index)?.to_string();
+        let descriptor = cp_utf8(&class_file.constant_pool, method.descriptor_index)?.to_string();
+        let length = method
+            .attributes
+            .iter()
+            .find_map(|attr| match attr {
+                AttributeInfo::Code(code) => Some(code.code.len().min(u16::MAX as usize) as u16),
+                _ => None,
+            })
+            .unwrap_or(0);
+        lengths.insert((name, descriptor), length);
+    }
+
+    Ok(lengths)
+}
+
+fn cp_utf8(pool: &[CpInfo], index: u16) -> Result<&str, String> {
+    match pool.get(index as usize) {
+        Some(CpInfo::Utf8(value)) => Ok(value.as_str()),
+        _ => Err(format!("invalid UTF-8 constant pool index {index}")),
     }
 }
