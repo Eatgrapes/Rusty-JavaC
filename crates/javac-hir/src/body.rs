@@ -27,10 +27,16 @@ impl Expr {
             },
             Expr::Binary { op, left, .. } => match op {
                 BinaryOp::AndAnd | BinaryOp::OrOr => Ty::Boolean,
-                BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Gt | BinaryOp::Le | BinaryOp::Ge => Ty::Boolean,
+                BinaryOp::Eq
+                | BinaryOp::Ne
+                | BinaryOp::Lt
+                | BinaryOp::Gt
+                | BinaryOp::Le
+                | BinaryOp::Ge => Ty::Boolean,
                 _ => exprs[*left].ty(exprs),
             },
             Expr::Ternary { then_expr, .. } => exprs[*then_expr].ty(exprs),
+            Expr::Switch { ty, .. } => ty.clone(),
             Expr::Cast { ty, .. } => ty.clone(),
             Expr::Instanceof { .. } => Ty::Boolean,
             Expr::Assign { value, .. } => exprs[*value].ty(exprs),

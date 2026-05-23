@@ -49,6 +49,8 @@ pub(crate) fn expr_ty(ctx: &CodegenCtx, body: &Body, expr_id: ExprId) -> Ty {
         Expr::Assign { value, .. } => expr_ty(ctx, body, *value),
         Expr::Parens(inner) => expr_ty(ctx, body, *inner),
         Expr::Cast { ty, .. } => ty.clone(),
+        Expr::Instanceof { .. } => Ty::Boolean,
+        Expr::Switch { ty, .. } => ty.clone(),
         _ => body.exprs[expr_id].ty(&body.exprs),
     }
 }

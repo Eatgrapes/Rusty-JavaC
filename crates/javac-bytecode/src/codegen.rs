@@ -64,7 +64,13 @@ impl<'a> CodegenCtx<'a> {
         if method.access_flags & javac_classfile::ACC_STATIC == 0 {
             self.next_local = 1;
         }
-        self.next_local += method.signature.param_slots() as u16;
+
+        for param in &method.params {
+            let slot = self.next_local;
+            self.locals.insert(param.name, slot);
+            self.local_types.insert(param.name, param.ty.clone());
+            self.next_local += param.ty.size() as u16;
+        }
     }
 
     pub fn alloc_local(&mut self, name: Ustr, ty: Ty) -> u16 {

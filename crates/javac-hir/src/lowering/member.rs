@@ -2,6 +2,7 @@ use crate::hir::*;
 use crate::lowering::expr::BodyBuilder;
 use crate::lowering::modifiers::{access_flags, has_code};
 use crate::lowering::stmt::lower_block;
+use crate::lowering::syntax::last_ident;
 use crate::lowering::types::lower_type;
 use crate::lowering::{LowerError, LowerResult};
 use javac_ast::ast::{AstNode, ClassBody, MethodDecl as AstMethodDecl};
@@ -51,13 +52,19 @@ fn lower_method_decl(
         .transpose()?
         .unwrap_or(Ty::Void);
     let params = lower_method_params(method.syntax())?;
-    let signature = MethodSig::new(Ustr::from(name.text()), params, return_type);
+    let signature = MethodSig::new(
+        Ustr::from(name.text()),
+        params.iter().map(|param| param.ty.clone()).collect(),
+        return_type,
+    );
     let mut body_builder = BodyBuilder::default();
+    define_params(&mut body_builder, &params);
     let root_block = lower_method_body(access_flags, &method, &mut body_builder)?;
 
     Ok(MethodDecl {
         id: HirId(method_index + 1),
         name: Ustr::from(name.text()),
+        params,
         signature,
         access_flags,
         body: body_builder.body,
@@ -65,7 +72,7 @@ fn lower_method_decl(
     })
 }
 
-fn lower_method_params(method: &JavaSyntaxNode) -> LowerResult<Vec<Ty>> {
+fn lower_method_params(method: &JavaSyntaxNode) -> LowerResult<Vec<ParamDecl>> {
     let Some(params) = method
         .children()
         .find(|child| child.kind() == JavaSyntaxKind::FormalParamList)
@@ -81,9 +88,19 @@ fn lower_method_params(method: &JavaSyntaxNode) -> LowerResult<Vec<Ty>> {
                 .children()
                 .find(|child| child.kind() == JavaSyntaxKind::Type)
                 .ok_or(LowerError::MissingType)?;
-            lower_type(&ty)
+            let name = last_ident(&param).ok_or(LowerError::MissingMethodName)?;
+            Ok(ParamDecl {
+                name: Ustr::from(name.text()),
+                ty: lower_type(&ty)?,
+            })
         })
         .collect()
+}
+
+fn define_params(body: &mut BodyBuilder, params: &[ParamDecl]) {
+    for param in params {
+        body.define_local(param.name, param.ty.clone());
+    }
 }
 
 fn lower_method_body(

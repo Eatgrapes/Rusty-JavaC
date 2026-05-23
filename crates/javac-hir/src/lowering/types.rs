@@ -21,6 +21,10 @@ pub(super) fn is_string_ty(ty: &Ty) -> bool {
     matches!(ty, Ty::Class(name) if name.as_str() == "java/lang/String")
 }
 
+pub(super) fn class_type_from_name(name: &str) -> Ty {
+    Ty::Class(Ustr::from(&class_internal_name(name)))
+}
+
 fn lower_base_type(node: &JavaSyntaxNode) -> LowerResult<Ty> {
     let Some(token) = node
         .descendants_with_tokens()
@@ -40,7 +44,7 @@ fn lower_base_type(node: &JavaSyntaxNode) -> LowerResult<Ty> {
         JavaSyntaxKind::LongKw => Ty::Long,
         JavaSyntaxKind::FloatKw => Ty::Float,
         JavaSyntaxKind::DoubleKw => Ty::Double,
-        JavaSyntaxKind::Ident => Ty::Class(Ustr::from(&class_internal_name(token.text()))),
+        JavaSyntaxKind::Ident => class_type_from_name(token.text()),
         JavaSyntaxKind::VarKw => Ty::Class(Ustr::from("java/lang/Object")),
         _ => return Err(LowerError::MissingType),
     };

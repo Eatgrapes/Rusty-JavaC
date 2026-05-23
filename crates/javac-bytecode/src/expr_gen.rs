@@ -3,6 +3,7 @@ mod calls;
 mod convert;
 mod literals;
 mod ops;
+mod switch;
 mod types;
 mod values;
 
@@ -51,6 +52,9 @@ pub fn gen_expr(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, expr_i
         Expr::Binary { op, left, right } => {
             ops::emit_binary(mw, ctx, body, op.clone(), *left, *right);
         }
+        Expr::Switch {
+            selector, cases, ..
+        } => switch::emit_switch_expr(mw, ctx, body, *selector, cases),
         Expr::Unary { op, operand } => ops::emit_unary(mw, ctx, body, op, *operand),
         Expr::NewObject { class, args } => {
             let owner = class.internal_name();
@@ -74,6 +78,10 @@ pub fn gen_expr(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, expr_i
         }
         Expr::PostInc(target) => assign::emit_post_inc_dec(mw, ctx, body, *target, 1),
         Expr::PostDec(target) => assign::emit_post_inc_dec(mw, ctx, body, *target, -1),
+        Expr::Instanceof { expr, ty } => {
+            gen_expr(mw, ctx, body, *expr);
+            mw.visit_type_insn(opcodes::INSTANCEOF, &ty.internal_name());
+        }
         _ => push_default_value(mw, &expr_ty(ctx, body, expr_id)),
     }
 }

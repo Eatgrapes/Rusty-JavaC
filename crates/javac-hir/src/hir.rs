@@ -1,6 +1,6 @@
-use javac_ty::{Ty, MethodSig, TypeParam};
-use std::rc::Rc;
+use javac_ty::{MethodSig, Ty, TypeParam};
 use la_arena::{Arena, Idx};
+use std::rc::Rc;
 use ustr::Ustr;
 
 pub type ExprId = Idx<Expr>;
@@ -71,10 +71,17 @@ pub struct FieldDecl {
 pub struct MethodDecl {
     pub id: HirId,
     pub name: Ustr,
+    pub params: Vec<ParamDecl>,
     pub signature: MethodSig,
     pub access_flags: u16,
     pub body: Body,
     pub root_block: Option<Block>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParamDecl {
+    pub name: Ustr,
+    pub ty: Ty,
 }
 
 #[derive(Debug, Clone)]
@@ -220,6 +227,12 @@ pub enum Expr {
         else_expr: ExprId,
     },
 
+    Switch {
+        selector: ExprId,
+        cases: Vec<SwitchCase>,
+        ty: Ty,
+    },
+
     Cast {
         ty: Ty,
         expr: ExprId,
@@ -268,17 +281,41 @@ pub enum UnaryOp {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BinaryOp {
-    Add, Sub, Mul, Div, Rem,
-    Shl, Shr, Ushr,
-    And, Or, Xor,
-    AndAnd, OrOr,
-    Eq, Ne, Lt, Gt, Le, Ge,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    Shl,
+    Shr,
+    Ushr,
+    And,
+    Or,
+    Xor,
+    AndAnd,
+    OrOr,
+    Eq,
+    Ne,
+    Lt,
+    Gt,
+    Le,
+    Ge,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AssignOp {
-    Plain, Add, Sub, Mul, Div, Rem,
-    Shl, Shr, Ushr, And, Or, Xor,
+    Plain,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    Shl,
+    Shr,
+    Ushr,
+    And,
+    Or,
+    Xor,
 }
 
 #[derive(Debug, Clone)]

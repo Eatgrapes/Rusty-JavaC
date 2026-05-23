@@ -73,6 +73,10 @@ impl MethodWriter {
         self.inner.visit_jump_insn(opcode, target);
     }
 
+    pub fn visit_lookup_switch(&mut self, default: Label, pairs: &[(i32, Label)]) {
+        self.inner.visit_lookup_switch(default, pairs);
+    }
+
     pub fn visit_label(&mut self, label: Label) {
         self.inner.visit_label(label);
     }
