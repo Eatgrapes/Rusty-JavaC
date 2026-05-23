@@ -80,6 +80,7 @@ pub struct MethodDecl {
     pub access_flags: u16,
     pub source_line: Option<u16>,
     pub generic_signature: Option<String>,
+    pub throws: Vec<Ty>,
     pub body: Body,
     pub root_block: Option<Block>,
 }

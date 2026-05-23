@@ -50,6 +50,7 @@ impl ClassFileWriter {
             name: name.to_string(),
             descriptor: descriptor.to_string(),
             signature: None,
+            exceptions: Vec::new(),
             local_variables: Vec::new(),
         }
     }
@@ -70,7 +71,7 @@ impl ClassFileWriter {
 
     pub fn to_bytes(self) -> Result<Vec<u8>, String> {
         let mut class_node = self.cw.to_class_node().map_err(|e| e.to_string())?;
-        add_signatures(
+        add_extra_attributes(
             &mut class_node,
             self.class_signature.as_deref(),
             &self.field_metadata,
@@ -93,6 +94,7 @@ pub struct MethodWriter {
     name: String,
     descriptor: String,
     signature: Option<String>,
+    exceptions: Vec<String>,
     local_variables: Vec<LocalVariableSpec>,
 }
 
@@ -151,6 +153,10 @@ impl MethodWriter {
 
     pub fn visit_signature(&mut self, signature: &str) {
         self.signature = Some(signature.to_string());
+    }
+
+    pub fn visit_exception(&mut self, internal_name: &str) {
+        self.exceptions.push(internal_name.to_string());
     }
 
     pub fn visit_field_insn(&mut self, opcode: u8, owner: &str, name: &str, descriptor: &str) {
@@ -214,6 +220,7 @@ impl MethodWriter {
             name: self.name.clone(),
             descriptor: self.descriptor.clone(),
             signature: self.signature.clone(),
+            exceptions: self.exceptions.clone(),
             local_variables: self.local_variables.clone(),
         });
         self.inner.visit_end(&mut cw.cw);
@@ -254,6 +261,7 @@ struct MethodMetadata {
     name: String,
     descriptor: String,
     signature: Option<String>,
+    exceptions: Vec<String>,
     local_variables: Vec<LocalVariableSpec>,
 }
 
@@ -264,7 +272,7 @@ struct FieldMetadata {
     signature: Option<String>,
 }
 
-fn add_signatures(
+fn add_extra_attributes(
     class_node: &mut rust_asm::nodes::ClassNode,
     class_signature: Option<&str>,
     field_metadata: &[FieldMetadata],
@@ -280,6 +288,12 @@ fn add_signatures(
             .any(|metadata| metadata.signature.is_some())
     {
         cp.utf8("Signature");
+    }
+    if method_metadata
+        .iter()
+        .any(|metadata| !metadata.exceptions.is_empty())
+    {
+        cp.utf8("Exceptions");
     }
 
     if let Some(signature) = class_signature {
@@ -302,6 +316,12 @@ fn add_signatures(
         {
             add_signature_attribute(&mut method.attributes, &mut cp, signature);
         }
+        if method.name == metadata.name
+            && method.descriptor == metadata.descriptor
+            && !metadata.exceptions.is_empty()
+        {
+            add_exceptions_attribute(&mut method.attributes, &mut cp, &metadata.exceptions);
+        }
     }
 
     class_node.constant_pool = cp.into_pool();
@@ -315,6 +335,21 @@ fn add_signature_attribute(
     attributes.retain(|attr| !matches!(attr, AttributeInfo::Signature { .. }));
     let signature_index = cp.utf8(signature);
     attributes.push(AttributeInfo::Signature { signature_index });
+}
+
+fn add_exceptions_attribute(
+    attributes: &mut Vec<AttributeInfo>,
+    cp: &mut ConstantPoolBuilder,
+    exceptions: &[String],
+) {
+    attributes.retain(|attr| !matches!(attr, AttributeInfo::Exceptions { .. }));
+    let exception_index_table = exceptions
+        .iter()
+        .map(|exception| cp.class(exception))
+        .collect();
+    attributes.push(AttributeInfo::Exceptions {
+        exception_index_table,
+    });
 }
 
 fn add_local_variables(

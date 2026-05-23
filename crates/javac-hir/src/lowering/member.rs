@@ -115,6 +115,7 @@ fn lower_constructor_decl(
 ) -> LowerResult<MethodDecl> {
     let type_vars = type_var_set(class_type_params, &[]);
     let params = lower_method_params(constructor, &type_vars)?;
+    let throws = lower_throws(constructor, &type_vars)?;
     let signature = MethodSig::new(
         Ustr::from("<init>"),
         params.iter().map(|param| param.ty.clone()).collect(),
@@ -140,6 +141,7 @@ fn lower_constructor_decl(
         access_flags,
         source_line: Some(source_line(constructor)),
         generic_signature: None,
+        throws,
         body: body_builder.body,
         root_block,
     })
@@ -160,6 +162,7 @@ fn lower_method_decl(
         .transpose()?
         .unwrap_or(Ty::Void);
     let params = lower_method_params(method.syntax(), &type_vars)?;
+    let throws = lower_throws(method.syntax(), &type_vars)?;
     let generic_signature =
         method_signature(method.syntax(), class_type_params, &method_type_params)?;
     let mut signature = MethodSig::new(
@@ -180,6 +183,7 @@ fn lower_method_decl(
         access_flags,
         source_line: Some(source_line(method.syntax())),
         generic_signature,
+        throws,
         body: body_builder.body,
         root_block,
     })
@@ -210,6 +214,21 @@ fn lower_method_params(
                 ty: lower_type_with_vars(&ty, type_vars)?,
             })
         })
+        .collect()
+}
+
+fn lower_throws(method: &JavaSyntaxNode, type_vars: &HashSet<Ustr>) -> LowerResult<Vec<Ty>> {
+    let Some(throws_clause) = method
+        .children()
+        .find(|child| child.kind() == JavaSyntaxKind::ThrowsClause)
+    else {
+        return Ok(Vec::new());
+    };
+
+    throws_clause
+        .descendants()
+        .filter(|node| node.kind() == JavaSyntaxKind::Type)
+        .map(|ty| lower_type_with_vars(&ty, type_vars))
         .collect()
 }
 

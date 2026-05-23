@@ -70,6 +70,9 @@ fn gen_method(
     if let Some(signature) = &method.generic_signature {
         mw.visit_signature(signature);
     }
+    for exception in &method.throws {
+        mw.visit_exception(&exception.internal_name());
+    }
 
     if method_has_code(method)
         && let Some(block) = &method.root_block
