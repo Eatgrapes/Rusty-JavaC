@@ -1,4 +1,4 @@
-use crate::lowering::types::lower_type;
+use crate::lowering::types::{class_internal_name, lower_type};
 use crate::lowering::{LowerError, LowerResult};
 use javac_ast::{JavaSyntaxKind, JavaSyntaxNode, JavaSyntaxToken};
 use javac_ty::{Ty, TypeParam};
@@ -259,7 +259,7 @@ impl TypeSignatureParser<'_> {
             return Ok(format!("T{first};"));
         }
 
-        let mut name = map_simple_class_name(&first);
+        let mut name = class_internal_name(&first);
         let mut args = self.parse_type_args()?;
         while self.eat(JavaSyntaxKind::Dot) {
             name.push('/');
@@ -330,11 +330,3 @@ impl TypeSignatureParser<'_> {
     }
 }
 
-fn map_simple_class_name(name: &str) -> String {
-    match name {
-        "String" => "java/lang/String".to_string(),
-        "Object" => "java/lang/Object".to_string(),
-        "Integer" => "java/lang/Integer".to_string(),
-        other => other.to_string(),
-    }
-}

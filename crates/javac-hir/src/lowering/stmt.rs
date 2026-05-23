@@ -682,13 +682,7 @@ fn push_header_token(segments: &mut [Vec<ExprToken>], token: javac_ast::JavaSynt
 }
 
 fn for_each_var_name(stmt: &JavaSyntaxNode) -> LowerResult<Ustr> {
-    stmt.descendants_with_tokens()
-        .filter_map(|element| element.into_token())
-        .take_while(|token| token.kind() != JavaSyntaxKind::Colon)
-        .filter(|token| token.kind() == JavaSyntaxKind::Ident)
-        .last()
-        .map(|token| Ustr::from(token.text()))
-        .ok_or(LowerError::MissingMethodName)
+    last_ident_before(stmt, JavaSyntaxKind::Colon)
 }
 
 fn for_each_iterable_tokens(stmt: &JavaSyntaxNode) -> Vec<ExprToken> {
@@ -724,21 +718,17 @@ fn for_each_iterable_tokens(stmt: &JavaSyntaxNode) -> Vec<ExprToken> {
 }
 
 fn catch_var_name(clause: &JavaSyntaxNode) -> LowerResult<Ustr> {
-    clause
-        .descendants_with_tokens()
-        .filter_map(|element| element.into_token())
-        .take_while(|token| token.kind() != JavaSyntaxKind::RParen)
-        .filter(|token| token.kind() == JavaSyntaxKind::Ident)
-        .last()
-        .map(|token| Ustr::from(token.text()))
-        .ok_or(LowerError::MissingMethodName)
+    last_ident_before(clause, JavaSyntaxKind::RParen)
 }
 
 fn resource_var_name(resource: &JavaSyntaxNode) -> LowerResult<Ustr> {
-    resource
-        .descendants_with_tokens()
+    last_ident_before(resource, JavaSyntaxKind::Eq)
+}
+
+fn last_ident_before(node: &JavaSyntaxNode, stop: JavaSyntaxKind) -> LowerResult<Ustr> {
+    node.descendants_with_tokens()
         .filter_map(|element| element.into_token())
-        .take_while(|token| token.kind() != JavaSyntaxKind::Eq)
+        .take_while(|token| token.kind() != stop)
         .filter(|token| token.kind() == JavaSyntaxKind::Ident)
         .last()
         .map(|token| Ustr::from(token.text()))

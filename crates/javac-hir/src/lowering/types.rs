@@ -81,7 +81,7 @@ fn is_type_token(token: &JavaSyntaxToken) -> bool {
     )
 }
 
-fn class_internal_name(name: &str) -> String {
+pub(super) fn class_internal_name(name: &str) -> String {
     match name {
         "String" => "java/lang/String".to_string(),
         "Object" => "java/lang/Object".to_string(),
