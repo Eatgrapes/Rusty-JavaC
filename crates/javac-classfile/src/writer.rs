@@ -260,6 +260,16 @@ fn add_signatures(
     method_metadata: &[MethodMetadata],
 ) {
     let mut cp = ConstantPoolBuilder::from_pool(class_node.constant_pool.clone());
+    if class_signature.is_some()
+        || field_metadata
+            .iter()
+            .any(|metadata| metadata.signature.is_some())
+        || method_metadata
+            .iter()
+            .any(|metadata| metadata.signature.is_some())
+    {
+        cp.utf8("Signature");
+    }
 
     if let Some(signature) = class_signature {
         add_signature_attribute(&mut class_node.attributes, &mut cp, signature);
@@ -302,6 +312,7 @@ fn add_local_variables(
     code_lengths: &HashMap<(String, String), u16>,
 ) {
     let mut cp = ConstantPoolBuilder::from_pool(class_node.constant_pool.clone());
+    cp.utf8("LocalVariableTable");
 
     for (method, metadata) in class_node.methods.iter_mut().zip(method_metadata) {
         if method.name != metadata.name || method.descriptor != metadata.descriptor {

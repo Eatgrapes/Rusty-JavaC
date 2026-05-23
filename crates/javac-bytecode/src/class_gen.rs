@@ -1,6 +1,7 @@
 use crate::codegen::CodegenCtx;
 use javac_classfile::ClassFileWriter;
 use javac_hir::hir::*;
+use javac_ty::Ty;
 use rust_asm::opcodes;
 
 const JAVA_VERSION: u32 = 21;
@@ -30,6 +31,9 @@ fn gen_type_decl(writer: &mut ClassFileWriter, type_decl: &TypeDecl) {
         Some(super_name.as_str()),
         &interface_refs,
     );
+    if let Some(signature) = &type_decl.generic_signature {
+        writer.visit_signature(signature);
+    }
 
     gen_fields(writer, &type_decl.fields);
     if needs_default_constructor(type_decl) {
@@ -41,9 +45,11 @@ fn gen_type_decl(writer: &mut ClassFileWriter, type_decl: &TypeDecl) {
 fn gen_fields(writer: &mut ClassFileWriter, fields: &[FieldDecl]) {
     for field in fields {
         let descriptor = field.ty.descriptor();
-        writer
-            .visit_field(field.access_flags, &field.name, &descriptor)
-            .visit_end(writer);
+        let mut fw = writer.visit_field(field.access_flags, &field.name, &descriptor);
+        if let Some(signature) = &field.generic_signature {
+            fw.visit_signature(signature);
+        }
+        fw.visit_end(writer);
     }
 }
 
@@ -61,6 +67,9 @@ fn gen_method(
 ) {
     let descriptor = method.signature.descriptor();
     let mut mw = writer.visit_method(method.access_flags, &method.name, &descriptor);
+    if let Some(signature) = &method.generic_signature {
+        mw.visit_signature(signature);
+    }
 
     if method_has_code(method)
         && let Some(block) = &method.root_block
@@ -71,12 +80,30 @@ fn gen_method(
         ctx.set_fields(&type_decl.fields);
         ctx.set_methods(&type_decl.methods);
         ctx.begin_method(method);
+        declare_method_locals(&mut mw, type_decl, method);
         gen_constructor_prelude(&mut mw, &ctx, method);
         crate::method_gen::gen_method_body(&mut mw, &mut ctx, &method.body, block);
         mw.visit_maxs(0, 0);
     }
 
     mw.visit_end(writer);
+}
+
+fn declare_method_locals(
+    mw: &mut javac_classfile::MethodWriter,
+    type_decl: &TypeDecl,
+    method: &MethodDecl,
+) {
+    let mut slot = 0;
+    if method.access_flags & javac_classfile::ACC_STATIC == 0 {
+        mw.visit_local_variable("this", &Ty::Class(type_decl.name).descriptor(), slot);
+        slot += 1;
+    }
+
+    for param in &method.params {
+        mw.visit_local_variable(param.name.as_str(), &param.ty.erasure().descriptor(), slot);
+        slot += param.ty.size() as u16;
+    }
 }
 
 fn gen_constructor_prelude(

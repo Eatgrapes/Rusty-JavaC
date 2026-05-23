@@ -181,5 +181,8 @@ pub(super) fn qualified_name_text(node: &JavaSyntaxNode) -> LowerResult<String> 
 }
 
 fn is_expr_token(kind: JavaSyntaxKind) -> bool {
-    !matches!(kind, JavaSyntaxKind::Semi)
+    !matches!(
+        kind,
+        JavaSyntaxKind::Semi | JavaSyntaxKind::Whitespace | JavaSyntaxKind::Comment
+    )
 }

@@ -56,13 +56,12 @@ pub(super) fn method_signature(
     class_type_params: &[TypeParam],
     method_type_params: &[TypeParam],
 ) -> LowerResult<Option<String>> {
-    if method_type_params.is_empty() && !has_generic_type(method) {
-        return Ok(None);
-    }
-
     let mut all_params = class_type_params.to_vec();
     all_params.extend_from_slice(method_type_params);
     let vars = type_var_names(&all_params);
+    if method_type_params.is_empty() && !has_generic_type(method) && !uses_type_var(method, &vars) {
+        return Ok(None);
+    }
 
     let mut signature = type_params_signature(method_type_params);
     signature.push('(');
@@ -122,6 +121,12 @@ fn has_generic_type(node: &JavaSyntaxNode) -> bool {
             JavaSyntaxKind::TypeArgList | JavaSyntaxKind::TypeParamList
         )
     })
+}
+
+fn uses_type_var(node: &JavaSyntaxNode, type_vars: &HashSet<String>) -> bool {
+    node.descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .any(|token| token.kind() == JavaSyntaxKind::Ident && type_vars.contains(token.text()))
 }
 
 fn type_children(node: &JavaSyntaxNode) -> impl Iterator<Item = JavaSyntaxNode> + '_ {

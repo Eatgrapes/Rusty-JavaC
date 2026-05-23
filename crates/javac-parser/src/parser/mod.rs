@@ -1,9 +1,9 @@
-mod top_level;
-mod type_decl;
-mod member;
-mod ty;
-mod stmt;
 mod expr;
+mod member;
+mod stmt;
+mod top_level;
+mod ty;
+mod type_decl;
 
 pub(crate) use javac_ast::JavaSyntaxKind;
 use javac_lexer::Lexer;
@@ -27,8 +27,10 @@ pub(crate) struct Token {
 }
 
 pub struct Parser {
+    pub(crate) source: String,
     pub(crate) tokens: Vec<Token>,
     pub(crate) pos: usize,
+    trivia_end: usize,
     pub(crate) builder: GreenNodeBuilder<'static>,
     pub(crate) errors: Vec<ParseError>,
 }
@@ -45,8 +47,10 @@ impl Parser {
             .collect();
 
         let mut parser = Parser {
+            source: source.to_string(),
             tokens,
             pos: 0,
+            trivia_end: 0,
             builder: GreenNodeBuilder::new(),
             errors: Vec::new(),
         };
@@ -67,38 +71,65 @@ impl Parser {
     }
 
     pub(crate) fn kind(&self) -> JavaSyntaxKind {
-        self.tokens.get(self.pos).map(|t| t.kind).unwrap_or(JavaSyntaxKind::Error)
+        self.tokens
+            .get(self.pos)
+            .map(|t| t.kind)
+            .unwrap_or(JavaSyntaxKind::Error)
     }
 
     pub(crate) fn look(&self, ahead: usize) -> JavaSyntaxKind {
-        self.tokens.get(self.pos + ahead).map(|t| t.kind).unwrap_or(JavaSyntaxKind::Error)
+        self.tokens
+            .get(self.pos + ahead)
+            .map(|t| t.kind)
+            .unwrap_or(JavaSyntaxKind::Error)
     }
 
-    pub(crate) fn at(&self, k: JavaSyntaxKind) -> bool { self.kind() == k }
+    pub(crate) fn at(&self, k: JavaSyntaxKind) -> bool {
+        self.kind() == k
+    }
 
-    pub(crate) fn at_any(&self, ks: &[JavaSyntaxKind]) -> bool { ks.contains(&self.kind()) }
+    pub(crate) fn at_any(&self, ks: &[JavaSyntaxKind]) -> bool {
+        ks.contains(&self.kind())
+    }
 
     pub(crate) fn bump(&mut self) {
         if self.pos < self.tokens.len() {
             let tok = &self.tokens[self.pos];
+            if self.trivia_end < tok.offset {
+                self.builder.token(
+                    JavaSyntaxKind::Whitespace.into(),
+                    &self.source[self.trivia_end..tok.offset],
+                );
+            }
             self.builder.token(tok.kind.into(), tok.text.as_str());
+            self.trivia_end = tok.offset + tok.text.len();
             self.pos += 1;
         }
     }
 
     pub(crate) fn expect(&mut self, k: JavaSyntaxKind) {
-        if self.at(k) { self.bump(); } else {
+        if self.at(k) {
+            self.bump();
+        } else {
             self.err(format!("expected {:?}, got {:?}", k, self.kind()));
         }
     }
 
     pub(crate) fn eat(&mut self, k: JavaSyntaxKind) -> bool {
-        if self.at(k) { self.bump(); true } else { false }
+        if self.at(k) {
+            self.bump();
+            true
+        } else {
+            false
+        }
     }
 
     pub(crate) fn err(&mut self, msg: impl Into<String>) {
         let off = self.tokens.get(self.pos).map(|t| t.offset).unwrap_or(0);
-        self.errors.push(ParseError { message: msg.into(), offset: off });
+        self.errors.push(ParseError {
+            message: msg.into(),
+            offset: off,
+        });
     }
 
     pub(crate) fn err_and_bump(&mut self, msg: impl Into<String>) {
@@ -118,7 +149,5 @@ impl Marker {
         p.builder.finish_node();
     }
 
-    pub(crate) fn abandon(self, _p: &mut Parser) {
-     
-    }
+    pub(crate) fn abandon(self, _p: &mut Parser) {}
 }

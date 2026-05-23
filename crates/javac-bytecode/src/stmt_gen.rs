@@ -6,6 +6,7 @@ use javac_ty::Ty;
 use rust_asm::opcodes;
 
 pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_id: StmtId) {
+    emit_line_number(mw, body, stmt_id);
     let stmt = &body.stmts[stmt_id];
     match stmt {
         Stmt::Return(Some(expr_id)) => {
@@ -31,6 +32,7 @@ pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_i
         }
         Stmt::LocalVar(var) => {
             let slot = ctx.alloc_local(var.name, var.ty.clone());
+            mw.visit_local_variable(var.name.as_str(), &var.ty.erasure().descriptor(), slot);
             if let Some(init) = &var.initializer {
                 crate::expr_gen::gen_expr(mw, ctx, body, *init);
                 let init_ty = crate::expr_gen::expr_ty(ctx, body, *init);
@@ -142,6 +144,14 @@ pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_i
             }
         }
         _ => {}
+    }
+}
+
+fn emit_line_number(mw: &mut MethodWriter, body: &Body, stmt_id: StmtId) {
+    if let Some(line) = body.stmt_lines.get(&stmt_id).copied() {
+        let label = Label::new();
+        mw.visit_label(label);
+        mw.visit_line_number(line, label);
     }
 }
 
