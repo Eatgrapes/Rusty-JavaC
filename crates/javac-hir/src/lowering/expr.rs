@@ -1,4 +1,5 @@
 use crate::hir::*;
+use crate::lowering::literal;
 use crate::lowering::syntax::ExprToken;
 use crate::lowering::types::{class_type_from_name, is_string_ty};
 use crate::lowering::{LowerError, LowerResult};
@@ -339,39 +340,39 @@ impl ExprLowerer<'_, '_> {
                 self.pos += 1;
                 Ok(self
                     .body
-                    .alloc_expr(Expr::IntLiteral(parse_int_literal(&token.text))))
+                    .alloc_expr(Expr::IntLiteral(literal::parse_int_literal(&token.text))))
             }
             JavaSyntaxKind::LongLiteral => {
                 self.pos += 1;
                 Ok(self
                     .body
-                    .alloc_expr(Expr::LongLiteral(parse_long_literal(&token.text))))
+                    .alloc_expr(Expr::LongLiteral(literal::parse_long_literal(&token.text))))
             }
             JavaSyntaxKind::FloatLiteral => {
                 self.pos += 1;
                 Ok(self
                     .body
-                    .alloc_expr(Expr::FloatLiteral(parse_float_literal(&token.text))))
+                    .alloc_expr(Expr::FloatLiteral(literal::parse_float_literal(&token.text))))
             }
             JavaSyntaxKind::DoubleLiteral => {
                 self.pos += 1;
                 Ok(self
                     .body
-                    .alloc_expr(Expr::DoubleLiteral(parse_double_literal(&token.text))))
+                    .alloc_expr(Expr::DoubleLiteral(literal::parse_double_literal(&token.text))))
             }
             JavaSyntaxKind::CharLiteral => {
                 self.pos += 1;
                 Ok(self
                     .body
-                    .alloc_expr(Expr::CharLiteral(parse_char_literal(&token.text))))
+                    .alloc_expr(Expr::CharLiteral(literal::parse_char_literal(&token.text))))
             }
             JavaSyntaxKind::StringLiteral => {
                 self.pos += 1;
                 Ok(self
                     .body
-                    .alloc_expr(Expr::StringLiteral(Ustr::from(&string_literal_value(
+                    .alloc_expr(Expr::StringLiteral(literal::string_literal_value(
                         &token.text,
-                    )))))
+                    ))))
             }
             JavaSyntaxKind::TrueKw | JavaSyntaxKind::FalseKw => {
                 self.pos += 1;
@@ -677,68 +678,4 @@ fn is_primitive_type_token(kind: JavaSyntaxKind) -> bool {
             | JavaSyntaxKind::FloatKw
             | JavaSyntaxKind::DoubleKw
     )
-}
-
-fn parse_int_literal(text: &str) -> i64 {
-    parse_integer_digits(text.trim_end_matches(['l', 'L']))
-}
-
-fn parse_long_literal(text: &str) -> i64 {
-    parse_integer_digits(text.trim_end_matches(['l', 'L']))
-}
-
-fn parse_float_literal(text: &str) -> f32 {
-    text.trim_end_matches(['f', 'F'])
-        .replace('_', "")
-        .parse()
-        .unwrap_or(0.0)
-}
-
-fn parse_double_literal(text: &str) -> f64 {
-    text.trim_end_matches(['d', 'D'])
-        .replace('_', "")
-        .parse()
-        .unwrap_or(0.0)
-}
-
-fn parse_char_literal(text: &str) -> char {
-    let value = text
-        .strip_prefix('\'')
-        .and_then(|value| value.strip_suffix('\''))
-        .unwrap_or(text);
-    match value {
-        "\\n" => '\n',
-        "\\t" => '\t',
-        "\\r" => '\r',
-        "\\'" => '\'',
-        "\\\\" => '\\',
-        _ => value.chars().next().unwrap_or('\0'),
-    }
-}
-
-fn parse_integer_digits(text: &str) -> i64 {
-    let cleaned = text.replace('_', "");
-    if let Some(hex) = cleaned
-        .strip_prefix("0x")
-        .or_else(|| cleaned.strip_prefix("0X"))
-    {
-        i64::from_str_radix(hex, 16).unwrap_or(0)
-    } else if let Some(binary) = cleaned
-        .strip_prefix("0b")
-        .or_else(|| cleaned.strip_prefix("0B"))
-    {
-        i64::from_str_radix(binary, 2).unwrap_or(0)
-    } else {
-        cleaned.parse().unwrap_or(0)
-    }
-}
-
-fn string_literal_value(text: &str) -> String {
-    text.strip_prefix('"')
-        .and_then(|value| value.strip_suffix('"'))
-        .unwrap_or(text)
-        .replace("\\\"", "\"")
-        .replace("\\n", "\n")
-        .replace("\\t", "\t")
-        .replace("\\\\", "\\")
 }

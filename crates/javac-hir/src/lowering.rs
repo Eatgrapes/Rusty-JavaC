@@ -1,5 +1,6 @@
 mod error;
 mod expr;
+mod literal;
 mod member;
 mod modifiers;
 mod signature;
