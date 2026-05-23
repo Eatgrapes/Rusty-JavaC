@@ -17,8 +17,8 @@ enum SimpleName {
 impl ClassCatalog {
     pub fn platform() -> Self {
         let mut catalog = Self::default();
-        for class_name in platform::CLASSES {
-            catalog.insert_internal_class(*class_name);
+        for class_name in platform::classes() {
+            catalog.insert_internal_class(class_name);
         }
         catalog
     }
