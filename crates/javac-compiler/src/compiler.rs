@@ -223,9 +223,11 @@ fn lower_error_help(error: &LowerError) -> &'static str {
         LowerError::MissingType => "add a valid Java type",
         LowerError::MissingImportName => "add a qualified import name",
         LowerError::UnknownImport { .. } => {
-            "remove the import or add it to the supported class set"
+            "check the import spelling or add the class, jar, or source directory with --class-path"
         }
-        LowerError::UnknownType { .. } => "import a supported class or use a known java.lang type",
+        LowerError::UnknownType { .. } => {
+            "import the type, use a java.lang type, or add it with --class-path"
+        }
         LowerError::UnsupportedTypeDeclaration => "use a class declaration",
         LowerError::UnsupportedClassMember => "remove or simplify this class member",
         LowerError::ExpectedCompilationUnit => "provide a Java compilation unit",
