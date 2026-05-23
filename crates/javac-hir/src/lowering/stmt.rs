@@ -1,7 +1,7 @@
 use crate::hir::*;
 use crate::lowering::expr::BodyBuilder;
 use crate::lowering::syntax::{
-    case_pattern_tokens, expr_tokens, first_ident, initializer_tokens, source_line,
+    ExprToken, case_pattern_tokens, expr_tokens, first_ident, initializer_tokens, source_line,
     tokens_after_keyword, tokens_in_first_parens,
 };
 use crate::lowering::types::{is_var_type, lower_type};
@@ -39,6 +39,9 @@ fn lower_stmt_nodes(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResul
         JavaSyntaxKind::ReturnStmt => vec![lower_return_stmt(stmt, body)?],
         JavaSyntaxKind::ThrowStmt => vec![lower_throw_stmt(stmt, body)?],
         JavaSyntaxKind::IfStmt => vec![lower_if_stmt(stmt, body)?],
+        JavaSyntaxKind::ForStmt => vec![lower_for_stmt(stmt, body)?],
+        JavaSyntaxKind::WhileStmt => vec![lower_while_stmt(stmt, body)?],
+        JavaSyntaxKind::DoStmt => vec![lower_do_stmt(stmt, body)?],
         JavaSyntaxKind::SwitchStmt => vec![lower_switch_stmt(stmt, body)?],
         JavaSyntaxKind::Block => {
             let block = lower_block(stmt, body)?;
@@ -185,6 +188,178 @@ fn lower_if_stmt(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResult<S
     ))
 }
 
+fn lower_for_stmt(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResult<StmtId> {
+    if let Some(for_each) = stmt
+        .children()
+        .find(|child| child.kind() == JavaSyntaxKind::ForEach)
+    {
+        return lower_for_each_stmt(&for_each, body);
+    }
+
+    body.enter_scope();
+    let init = stmt
+        .children()
+        .find(|child| child.kind() == JavaSyntaxKind::ForInit)
+        .map(|node| lower_for_init(&node, body))
+        .transpose()?
+        .flatten();
+    let header = for_header_segments(stmt)?;
+    let condition = header
+        .get(1)
+        .filter(|tokens| !tokens.is_empty())
+        .map(|tokens| body.lower_expr_tokens(tokens))
+        .transpose()?
+        .flatten();
+    let update = header
+        .get(2)
+        .filter(|tokens| !tokens.is_empty())
+        .map(|tokens| body.lower_expr_tokens(tokens))
+        .transpose()?
+        .flatten();
+    let body_node = stmt
+        .children()
+        .filter(is_statement_node)
+        .last()
+        .ok_or(LowerError::UnsupportedExpression)?;
+    let loop_body = lower_stmt_as_branch(&body_node, body)?;
+    body.exit_scope();
+
+    Ok(body.alloc_stmt_at(
+        Stmt::For {
+            init,
+            condition,
+            update,
+            body: loop_body,
+        },
+        source_line(stmt),
+    ))
+}
+
+fn lower_for_init(init: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResult<Option<StmtId>> {
+    if init
+        .children()
+        .any(|child| child.kind() == JavaSyntaxKind::Type)
+    {
+        let mut lowered = lower_for_init_var_decl(init, body)?;
+        return Ok(lowered.pop());
+    }
+
+    let Some(expr) = body.lower_expr_tokens(&expr_tokens(init))? else {
+        return Ok(None);
+    };
+    Ok(Some(
+        body.alloc_stmt_at(Stmt::Expr(expr), source_line(init)),
+    ))
+}
+
+fn lower_for_init_var_decl(
+    init: &JavaSyntaxNode,
+    body: &mut BodyBuilder,
+) -> LowerResult<Vec<StmtId>> {
+    let declared_ty = init
+        .children()
+        .find(|child| child.kind() == JavaSyntaxKind::Type)
+        .ok_or(LowerError::MissingType)?;
+    let ty = lower_type(&declared_ty)?;
+    let mut stmts = Vec::new();
+
+    for declarator in init
+        .descendants()
+        .filter(|node| node.kind() == JavaSyntaxKind::VarDeclarator)
+    {
+        let name = first_ident(&declarator).ok_or(LowerError::MissingMethodName)?;
+        let initializer = if let Some(tokens) = initializer_tokens(&declarator) {
+            body.lower_expr_tokens(&tokens)?
+        } else {
+            None
+        };
+        let name = Ustr::from(name.text());
+        body.define_local(name, ty.clone());
+        stmts.push(body.alloc_stmt_at(
+            Stmt::LocalVar(LocalVarDecl {
+                ty: ty.clone(),
+                name,
+                initializer,
+            }),
+            source_line(&declarator),
+        ));
+    }
+
+    Ok(stmts)
+}
+
+fn lower_for_each_stmt(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResult<StmtId> {
+    let declared_ty = stmt
+        .children()
+        .find(|child| child.kind() == JavaSyntaxKind::Type)
+        .ok_or(LowerError::MissingType)?;
+    let var_type = lower_type(&declared_ty)?;
+    let var_name = for_each_var_name(stmt)?;
+    let iterable = body
+        .lower_expr_tokens(&for_each_iterable_tokens(stmt))?
+        .ok_or(LowerError::UnsupportedExpression)?;
+
+    body.enter_scope();
+    body.define_local(var_name, var_type.clone());
+    let body_node = stmt
+        .children()
+        .filter(is_statement_node)
+        .last()
+        .ok_or(LowerError::UnsupportedExpression)?;
+    let loop_body = lower_stmt_as_branch(&body_node, body)?;
+    body.exit_scope();
+
+    Ok(body.alloc_stmt_at(
+        Stmt::ForEach {
+            var_type,
+            var_name,
+            iterable,
+            body: loop_body,
+        },
+        source_line(stmt),
+    ))
+}
+
+fn lower_while_stmt(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResult<StmtId> {
+    let condition = body
+        .lower_expr_tokens(&tokens_in_first_parens(stmt)?)?
+        .ok_or(LowerError::UnsupportedExpression)?;
+    let body_node = stmt
+        .children()
+        .filter(is_statement_node)
+        .last()
+        .ok_or(LowerError::UnsupportedExpression)?;
+    let loop_body = lower_stmt_as_branch(&body_node, body)?;
+
+    Ok(body.alloc_stmt_at(
+        Stmt::While {
+            condition,
+            body: loop_body,
+        },
+        source_line(stmt),
+    ))
+}
+
+fn lower_do_stmt(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResult<StmtId> {
+    let body_node = stmt
+        .children()
+        .filter(is_statement_node)
+        .next()
+        .ok_or(LowerError::UnsupportedExpression)?;
+    let loop_body = lower_stmt_as_branch(&body_node, body)?;
+    let condition = body
+        .lower_expr_tokens(&tokens_in_first_parens(stmt)?)?
+        .ok_or(LowerError::UnsupportedExpression)?;
+
+    Ok(body.alloc_stmt_at(
+        Stmt::Do {
+            body: loop_body,
+            condition,
+        },
+        source_line(stmt),
+    ))
+}
+
 fn lower_switch_expr(switch: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResult<ExprId> {
     let selector = body
         .lower_expr_tokens(&tokens_in_first_parens(switch)?)?
@@ -282,7 +457,7 @@ fn lower_switch_rule(
     {
         let block = lower_block(&block, body)?;
         return Ok(vec![
-            body.alloc_stmt_at(Stmt::Block(block), source_line(rule))
+            body.alloc_stmt_at(Stmt::Block(block), source_line(rule)),
         ]);
     }
 
@@ -299,7 +474,7 @@ fn lower_switch_rule(
         .ok_or(LowerError::UnsupportedExpression)?;
     switch_ty.get_or_insert_with(|| body.expr_ty(value));
     Ok(vec![
-        body.alloc_stmt_at(Stmt::Yield(value), source_line(rule))
+        body.alloc_stmt_at(Stmt::Yield(value), source_line(rule)),
     ])
 }
 
@@ -324,6 +499,9 @@ fn is_statement_node(node: &JavaSyntaxNode) -> bool {
             | JavaSyntaxKind::EmptyStmt
             | JavaSyntaxKind::LocalVarDecl
             | JavaSyntaxKind::IfStmt
+            | JavaSyntaxKind::ForStmt
+            | JavaSyntaxKind::WhileStmt
+            | JavaSyntaxKind::DoStmt
             | JavaSyntaxKind::ReturnStmt
             | JavaSyntaxKind::ThrowStmt
             | JavaSyntaxKind::BreakStmt
@@ -331,6 +509,108 @@ fn is_statement_node(node: &JavaSyntaxNode) -> bool {
             | JavaSyntaxKind::SwitchStmt
             | JavaSyntaxKind::YieldStmt
     )
+}
+
+fn for_header_segments(stmt: &JavaSyntaxNode) -> LowerResult<Vec<Vec<ExprToken>>> {
+    let mut seen_open = false;
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut segments = vec![Vec::new()];
+
+    for token in stmt
+        .descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+    {
+        if !seen_open {
+            if token.kind() == JavaSyntaxKind::LParen {
+                seen_open = true;
+                paren_depth = 1;
+            }
+            continue;
+        }
+
+        match token.kind() {
+            JavaSyntaxKind::LParen => {
+                paren_depth += 1;
+                push_header_token(&mut segments, token);
+            }
+            JavaSyntaxKind::RParen => {
+                paren_depth = paren_depth.saturating_sub(1);
+                if paren_depth == 0 {
+                    return Ok(segments);
+                }
+                push_header_token(&mut segments, token);
+            }
+            JavaSyntaxKind::LBrack => {
+                bracket_depth += 1;
+                push_header_token(&mut segments, token);
+            }
+            JavaSyntaxKind::RBrack => {
+                bracket_depth = bracket_depth.saturating_sub(1);
+                push_header_token(&mut segments, token);
+            }
+            JavaSyntaxKind::Semi if paren_depth == 1 && bracket_depth == 0 => {
+                segments.push(Vec::new());
+            }
+            _ => push_header_token(&mut segments, token),
+        }
+    }
+
+    Err(LowerError::UnsupportedExpression)
+}
+
+fn push_header_token(segments: &mut [Vec<ExprToken>], token: javac_ast::JavaSyntaxToken) {
+    if matches!(
+        token.kind(),
+        JavaSyntaxKind::Whitespace | JavaSyntaxKind::Comment
+    ) {
+        return;
+    }
+    if let Some(segment) = segments.last_mut() {
+        segment.push(ExprToken::from(token));
+    }
+}
+
+fn for_each_var_name(stmt: &JavaSyntaxNode) -> LowerResult<Ustr> {
+    stmt.descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .take_while(|token| token.kind() != JavaSyntaxKind::Colon)
+        .filter(|token| token.kind() == JavaSyntaxKind::Ident)
+        .last()
+        .map(|token| Ustr::from(token.text()))
+        .ok_or(LowerError::MissingMethodName)
+}
+
+fn for_each_iterable_tokens(stmt: &JavaSyntaxNode) -> Vec<ExprToken> {
+    let mut seen_colon = false;
+    let mut paren_depth = 0usize;
+    let mut tokens = Vec::new();
+
+    for token in stmt
+        .descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+    {
+        if !seen_colon {
+            seen_colon = token.kind() == JavaSyntaxKind::Colon;
+            continue;
+        }
+
+        match token.kind() {
+            JavaSyntaxKind::LParen => {
+                paren_depth += 1;
+                tokens.push(ExprToken::from(token));
+            }
+            JavaSyntaxKind::RParen if paren_depth == 0 => break,
+            JavaSyntaxKind::RParen => {
+                paren_depth = paren_depth.saturating_sub(1);
+                tokens.push(ExprToken::from(token));
+            }
+            JavaSyntaxKind::Whitespace | JavaSyntaxKind::Comment => {}
+            _ => tokens.push(ExprToken::from(token)),
+        }
+    }
+
+    tokens
 }
 
 fn has_token(node: &JavaSyntaxNode, kind: JavaSyntaxKind) -> bool {

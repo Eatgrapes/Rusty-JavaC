@@ -1,4 +1,5 @@
 use crate::codegen::CodegenCtx;
+use crate::local_var::{load_opcode, store_opcode};
 use javac_classfile::Label;
 use javac_classfile::MethodWriter;
 use javac_hir::hir::*;
@@ -81,7 +82,9 @@ pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_i
             gen_stmt(mw, ctx, body, *loop_body);
             ctx.break_labels.pop();
             ctx.continue_labels.pop();
-            mw.visit_jump_insn(opcodes::GOTO, start_label);
+            if !stmt_definitely_exits(body, *loop_body) {
+                mw.visit_jump_insn(opcodes::GOTO, start_label);
+            }
             mw.visit_label(end_label);
         }
         Stmt::Do {
@@ -133,6 +136,14 @@ pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_i
             mw.visit_jump_insn(opcodes::GOTO, start_label);
             mw.visit_label(end_label);
         }
+        Stmt::ForEach {
+            var_type,
+            var_name,
+            iterable,
+            body: loop_body,
+        } => {
+            emit_array_for_each(mw, ctx, body, var_type, *var_name, *iterable, *loop_body);
+        }
         Stmt::Throw(expr_id) => {
             crate::expr_gen::gen_expr(mw, ctx, body, *expr_id);
             mw.visit_insn(opcodes::ATHROW);
@@ -152,6 +163,61 @@ pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_i
         }
         _ => {}
     }
+}
+
+fn emit_array_for_each(
+    mw: &mut MethodWriter,
+    ctx: &mut CodegenCtx,
+    body: &Body,
+    var_type: &Ty,
+    var_name: ustr::Ustr,
+    iterable: ExprId,
+    loop_body: StmtId,
+) {
+    let array_ty = crate::expr_gen::expr_ty(ctx, body, iterable);
+    let element_ty = match array_ty.erasure() {
+        Ty::Array(element) => *element,
+        _ => var_type.clone(),
+    };
+    let array_slot = ctx.alloc_temp(&array_ty);
+    let index_slot = ctx.alloc_temp(&Ty::Int);
+    let var_slot = ctx.alloc_local(var_name, var_type.clone());
+
+    crate::expr_gen::gen_expr(mw, ctx, body, iterable);
+    mw.visit_var_insn(store_opcode(&array_ty), array_slot);
+    mw.visit_insn(opcodes::ICONST_0);
+    mw.visit_var_insn(opcodes::ISTORE, index_slot);
+    mw.visit_local_variable(
+        var_name.as_str(),
+        &var_type.erasure().descriptor(),
+        var_slot,
+    );
+
+    let start_label = Label::new();
+    let continue_label = Label::new();
+    let end_label = Label::new();
+    mw.visit_label(start_label);
+    mw.visit_var_insn(opcodes::ILOAD, index_slot);
+    mw.visit_var_insn(load_opcode(&array_ty), array_slot);
+    mw.visit_insn(opcodes::ARRAYLENGTH);
+    mw.visit_jump_insn(opcodes::IF_ICMPGE, end_label);
+
+    mw.visit_var_insn(load_opcode(&array_ty), array_slot);
+    mw.visit_var_insn(opcodes::ILOAD, index_slot);
+    mw.visit_insn(crate::expr_gen::array_load_opcode(&element_ty));
+    crate::expr_gen::coerce(mw, &element_ty, var_type);
+    mw.visit_var_insn(store_opcode(var_type), var_slot);
+
+    ctx.continue_labels.push(continue_label);
+    ctx.break_labels.push(end_label);
+    gen_stmt(mw, ctx, body, loop_body);
+    ctx.break_labels.pop();
+    ctx.continue_labels.pop();
+
+    mw.visit_label(continue_label);
+    mw.visit_iinc_insn(index_slot, 1);
+    mw.visit_jump_insn(opcodes::GOTO, start_label);
+    mw.visit_label(end_label);
 }
 
 fn emit_line_number(mw: &mut MethodWriter, body: &Body, stmt_id: StmtId) {
@@ -211,7 +277,7 @@ fn return_opcode(ty: &Ty) -> u8 {
 
 fn stmt_definitely_exits(body: &Body, stmt_id: StmtId) -> bool {
     match &body.stmts[stmt_id] {
-        Stmt::Return(_) | Stmt::Throw(_) => true,
+        Stmt::Return(_) | Stmt::Throw(_) | Stmt::Break(_) | Stmt::Continue(_) => true,
         Stmt::Block(block) => block
             .stmts
             .last()

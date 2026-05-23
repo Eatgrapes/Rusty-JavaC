@@ -14,6 +14,7 @@ use javac_hir::hir::*;
 use javac_ty::Ty;
 use rust_asm::opcodes;
 
+pub(crate) use arrays::array_load_opcode;
 pub(crate) use convert::{coerce, pop_ty, push_default_value};
 pub(crate) use types::expr_ty;
 

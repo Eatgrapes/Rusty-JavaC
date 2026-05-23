@@ -133,7 +133,7 @@ fn emit_primitive_class(mw: &mut MethodWriter, ty: &Ty) {
     mw.visit_field_insn(opcodes::GETSTATIC, owner, "TYPE", "Ljava/lang/Class;");
 }
 
-fn array_load_opcode(element_type: &Ty) -> u8 {
+pub(crate) fn array_load_opcode(element_type: &Ty) -> u8 {
     match element_type.erasure() {
         Ty::Long => opcodes::LALOAD,
         Ty::Float => opcodes::FALOAD,
