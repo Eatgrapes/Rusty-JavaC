@@ -502,7 +502,7 @@ fn emit_pattern_binding(
     binding: PatternBinding,
 ) {
     crate::expr_gen::gen_expr(mw, ctx, body, binding.source);
-    crate::expr_gen::coerce(
+    crate::expr_gen::cast(
         mw,
         &crate::expr_gen::expr_ty(ctx, body, binding.source),
         &binding.ty,

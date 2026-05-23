@@ -16,7 +16,7 @@ use javac_ty::Ty;
 use rust_asm::opcodes;
 
 pub(crate) use arrays::array_load_opcode;
-pub(crate) use convert::{coerce, pop_ty, push_default_value};
+pub(crate) use convert::{cast, coerce, pop_ty, push_default_value};
 pub(crate) use types::expr_ty;
 
 pub fn gen_expr(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, expr_id: ExprId) {
@@ -79,7 +79,7 @@ pub fn gen_expr(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, expr_i
         Expr::Parens(inner) => gen_expr(mw, ctx, body, *inner),
         Expr::Cast { ty, expr } => {
             gen_expr(mw, ctx, body, *expr);
-            coerce(mw, &expr_ty(ctx, body, *expr), ty);
+            cast(mw, &expr_ty(ctx, body, *expr), ty);
         }
         Expr::NewArray {
             element_type,
