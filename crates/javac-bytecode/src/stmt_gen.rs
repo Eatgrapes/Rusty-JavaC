@@ -161,6 +161,7 @@ pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_i
         Stmt::Switch { selector, cases } => {
             crate::expr_gen::switch::emit_switch_stmt(mw, ctx, body, *selector, cases);
         }
+        Stmt::Try(try_stmt) => emit_try_stmt(mw, ctx, body, try_stmt),
         _ => {}
     }
 }
@@ -218,6 +219,89 @@ fn emit_array_for_each(
     mw.visit_iinc_insn(index_slot, 1);
     mw.visit_jump_insn(opcodes::GOTO, start_label);
     mw.visit_label(end_label);
+}
+
+fn emit_try_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, try_stmt: &TryStmt) {
+    let start_label = Label::new();
+    let end_label = Label::new();
+    let after_label = Label::new();
+    let catch_labels = try_stmt
+        .catches
+        .iter()
+        .map(|_| Label::new())
+        .collect::<Vec<_>>();
+    let finally_handler = try_stmt.finally.as_ref().map(|_| Label::new());
+
+    for (catch, label) in try_stmt.catches.iter().zip(&catch_labels) {
+        mw.visit_try_catch_block(
+            start_label,
+            end_label,
+            *label,
+            Some(&catch.exception_type.internal_name()),
+        );
+    }
+    if let Some(handler) = finally_handler {
+        mw.visit_try_catch_block(start_label, end_label, handler, None);
+    }
+
+    mw.visit_label(start_label);
+    for stmt in &try_stmt.body.stmts {
+        gen_stmt(mw, ctx, body, *stmt);
+    }
+    mw.visit_label(end_label);
+    emit_finally_block(mw, ctx, body, try_stmt.finally.as_ref());
+    mw.visit_jump_insn(opcodes::GOTO, after_label);
+
+    for (catch, label) in try_stmt.catches.iter().zip(catch_labels) {
+        let catch_end = Label::new();
+        if let Some(handler) = finally_handler {
+            mw.visit_try_catch_block(label, catch_end, handler, None);
+        }
+
+        mw.visit_label(label);
+        let slot = ctx.alloc_local(catch.var_name, catch.exception_type.clone());
+        mw.visit_local_variable(
+            catch.var_name.as_str(),
+            &catch.exception_type.erasure().descriptor(),
+            slot,
+        );
+        mw.visit_var_insn(opcodes::ASTORE, slot);
+        for stmt in &catch.body.stmts {
+            gen_stmt(mw, ctx, body, *stmt);
+        }
+        mw.visit_label(catch_end);
+        emit_finally_block(mw, ctx, body, try_stmt.finally.as_ref());
+        mw.visit_jump_insn(opcodes::GOTO, after_label);
+    }
+
+    if let (Some(finally), Some(handler)) = (try_stmt.finally.as_ref(), finally_handler) {
+        mw.visit_label(handler);
+        let throwable = Ty::Class(ustr::Ustr::from("java/lang/Throwable"));
+        let slot = ctx.alloc_temp(&throwable);
+        mw.visit_var_insn(opcodes::ASTORE, slot);
+        emit_block(mw, ctx, body, finally);
+        mw.visit_var_insn(opcodes::ALOAD, slot);
+        mw.visit_insn(opcodes::ATHROW);
+    }
+
+    mw.visit_label(after_label);
+}
+
+fn emit_finally_block(
+    mw: &mut MethodWriter,
+    ctx: &mut CodegenCtx,
+    body: &Body,
+    finally: Option<&Block>,
+) {
+    if let Some(finally) = finally {
+        emit_block(mw, ctx, body, finally);
+    }
+}
+
+fn emit_block(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, block: &Block) {
+    for stmt in &block.stmts {
+        gen_stmt(mw, ctx, body, *stmt);
+    }
 }
 
 fn emit_line_number(mw: &mut MethodWriter, body: &Body, stmt_id: StmtId) {

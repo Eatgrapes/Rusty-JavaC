@@ -86,6 +86,7 @@ fn class_internal_name(name: &str) -> String {
         "String" => "java/lang/String".to_string(),
         "Object" => "java/lang/Object".to_string(),
         "Integer" => "java/lang/Integer".to_string(),
+        "IOException" => "java/io/IOException".to_string(),
         _ => name.replace('.', "/"),
     }
 }

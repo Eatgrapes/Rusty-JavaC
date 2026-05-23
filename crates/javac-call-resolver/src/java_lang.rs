@@ -4,6 +4,7 @@ use rust_asm::opcodes;
 
 const STRING_CLASS: &str = "java/lang/String";
 const OBJECT_CLASS: &str = "java/lang/Object";
+const THROWABLE_CLASS: &str = "java/lang/Throwable";
 
 pub fn class_name(simple_name: &str) -> Option<&'static str> {
     match simple_name {
@@ -24,6 +25,14 @@ pub fn resolve_instance_method(receiver: &Ty, name: &str, args: &[Ty]) -> Option
             name: "hashCode",
             descriptor: "()I".to_string(),
             return_ty: Ty::Int,
+            opcode: opcodes::INVOKEVIRTUAL,
+            is_interface: false,
+        }),
+        (Ty::Class(_), "printStackTrace", []) => Some(MethodRef {
+            owner: THROWABLE_CLASS,
+            name: "printStackTrace",
+            descriptor: "()V".to_string(),
+            return_ty: Ty::Void,
             opcode: opcodes::INVOKEVIRTUAL,
             is_interface: false,
         }),

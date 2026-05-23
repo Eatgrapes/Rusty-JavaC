@@ -43,6 +43,7 @@ fn lower_stmt_nodes(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResul
         JavaSyntaxKind::WhileStmt => vec![lower_while_stmt(stmt, body)?],
         JavaSyntaxKind::DoStmt => vec![lower_do_stmt(stmt, body)?],
         JavaSyntaxKind::SwitchStmt => vec![lower_switch_stmt(stmt, body)?],
+        JavaSyntaxKind::TryStmt => vec![lower_try_stmt(stmt, body)?],
         JavaSyntaxKind::Block => {
             let block = lower_block(stmt, body)?;
             vec![body.alloc_stmt_at(Stmt::Block(block), source_line(stmt))]
@@ -360,6 +361,73 @@ fn lower_do_stmt(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResult<S
     ))
 }
 
+fn lower_try_stmt(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResult<StmtId> {
+    if stmt
+        .children()
+        .any(|child| child.kind() == JavaSyntaxKind::TryWithResources)
+    {
+        return Ok(body.alloc_stmt_at(Stmt::Empty, source_line(stmt)));
+    }
+
+    let try_block = stmt
+        .children()
+        .find(|child| child.kind() == JavaSyntaxKind::Block)
+        .ok_or(LowerError::UnsupportedExpression)?;
+    let try_body = lower_block(&try_block, body)?;
+    let catches = stmt
+        .children()
+        .filter(|child| child.kind() == JavaSyntaxKind::CatchClause)
+        .map(|clause| lower_catch_clause(&clause, body))
+        .collect::<LowerResult<Vec<_>>>()?;
+    let finally = stmt
+        .children()
+        .find(|child| child.kind() == JavaSyntaxKind::FinallyClause)
+        .map(|clause| lower_finally_clause(&clause, body))
+        .transpose()?;
+
+    Ok(body.alloc_stmt_at(
+        Stmt::Try(TryStmt {
+            resources: Vec::new(),
+            body: try_body,
+            catches,
+            finally,
+        }),
+        source_line(stmt),
+    ))
+}
+
+fn lower_catch_clause(clause: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResult<CatchClause> {
+    let ty_node = clause
+        .children()
+        .find(|child| child.kind() == JavaSyntaxKind::Type)
+        .ok_or(LowerError::MissingType)?;
+    let exception_type = lower_type(&ty_node)?;
+    let var_name = catch_var_name(clause)?;
+    let catch_block = clause
+        .children()
+        .find(|child| child.kind() == JavaSyntaxKind::Block)
+        .ok_or(LowerError::UnsupportedExpression)?;
+
+    body.enter_scope();
+    body.define_local(var_name, exception_type.clone());
+    let block = lower_block(&catch_block, body)?;
+    body.exit_scope();
+
+    Ok(CatchClause {
+        exception_type,
+        var_name,
+        body: block,
+    })
+}
+
+fn lower_finally_clause(clause: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResult<Block> {
+    let block = clause
+        .children()
+        .find(|child| child.kind() == JavaSyntaxKind::Block)
+        .ok_or(LowerError::UnsupportedExpression)?;
+    lower_block(&block, body)
+}
+
 fn lower_switch_expr(switch: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResult<ExprId> {
     let selector = body
         .lower_expr_tokens(&tokens_in_first_parens(switch)?)?
@@ -502,6 +570,7 @@ fn is_statement_node(node: &JavaSyntaxNode) -> bool {
             | JavaSyntaxKind::ForStmt
             | JavaSyntaxKind::WhileStmt
             | JavaSyntaxKind::DoStmt
+            | JavaSyntaxKind::TryStmt
             | JavaSyntaxKind::ReturnStmt
             | JavaSyntaxKind::ThrowStmt
             | JavaSyntaxKind::BreakStmt
@@ -611,6 +680,17 @@ fn for_each_iterable_tokens(stmt: &JavaSyntaxNode) -> Vec<ExprToken> {
     }
 
     tokens
+}
+
+fn catch_var_name(clause: &JavaSyntaxNode) -> LowerResult<Ustr> {
+    clause
+        .descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .take_while(|token| token.kind() != JavaSyntaxKind::RParen)
+        .filter(|token| token.kind() == JavaSyntaxKind::Ident)
+        .last()
+        .map(|token| Ustr::from(token.text()))
+        .ok_or(LowerError::MissingMethodName)
 }
 
 fn has_token(node: &JavaSyntaxNode, kind: JavaSyntaxKind) -> bool {

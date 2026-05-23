@@ -130,6 +130,17 @@ impl MethodWriter {
             .visit_line_number(line, LabelNode::from_label(label));
     }
 
+    pub fn visit_try_catch_block(
+        &mut self,
+        start: Label,
+        end: Label,
+        handler: Label,
+        catch_type: Option<&str>,
+    ) {
+        self.inner
+            .visit_try_catch_block(start, end, handler, catch_type);
+    }
+
     pub fn visit_local_variable(&mut self, name: &str, descriptor: &str, index: u16) {
         self.local_variables.push(LocalVariableSpec {
             name: name.to_string(),
