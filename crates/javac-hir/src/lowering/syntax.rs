@@ -25,7 +25,18 @@ pub(super) fn first_ident(node: &JavaSyntaxNode) -> Option<JavaSyntaxToken> {
 
 pub(super) fn source_line(node: &JavaSyntaxNode) -> u16 {
     let root = node.ancestors().last().unwrap_or_else(|| node.clone());
-    let start = u32::from(node.text_range().start()) as usize;
+    let start = node
+        .descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .find(|token| {
+            !matches!(
+                token.kind(),
+                JavaSyntaxKind::Whitespace | JavaSyntaxKind::Comment
+            )
+        })
+        .map(|token| token.text_range().start())
+        .unwrap_or_else(|| node.text_range().start());
+    let start = u32::from(start) as usize;
     source_line_at(&root, start)
 }
 
