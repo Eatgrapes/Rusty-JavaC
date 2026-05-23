@@ -14,7 +14,8 @@ pub(super) fn emit_new_array(
     initializer: Option<&ArrayInit>,
 ) {
     if element_type.is_primitive() {
-        emit_primitive_array(mw, ctx, body, element_type, dimensions, initializer);
+        emit_array_length(mw, ctx, body, dimensions, initializer);
+        mw.visit_new_array(primitive_array_type_code(element_type));
     } else {
         emit_array_length(mw, ctx, body, dimensions, initializer);
         mw.visit_type_insn(opcodes::ANEWARRAY, &element_type.internal_name());
@@ -61,29 +62,6 @@ pub(super) fn array_element_type(ctx: &CodegenCtx, body: &Body, array: ExprId) -
     }
 }
 
-fn emit_primitive_array(
-    mw: &mut MethodWriter,
-    ctx: &mut CodegenCtx,
-    body: &Body,
-    element_type: &Ty,
-    dimensions: &[Option<ExprId>],
-    initializer: Option<&ArrayInit>,
-) {
-    emit_primitive_class(mw, element_type);
-    emit_array_length(mw, ctx, body, dimensions, initializer);
-    mw.visit_method_insn(
-        opcodes::INVOKESTATIC,
-        "java/lang/reflect/Array",
-        "newInstance",
-        "(Ljava/lang/Class;I)Ljava/lang/Object;",
-        false,
-    );
-    mw.visit_type_insn(
-        opcodes::CHECKCAST,
-        &Ty::Array(Box::new(element_type.clone())).descriptor(),
-    );
-}
-
 fn emit_array_length(
     mw: &mut MethodWriter,
     ctx: &mut CodegenCtx,
@@ -118,19 +96,18 @@ fn emit_array_initializer(
     }
 }
 
-fn emit_primitive_class(mw: &mut MethodWriter, ty: &Ty) {
-    let owner = match ty {
-        Ty::Boolean => "java/lang/Boolean",
-        Ty::Byte => "java/lang/Byte",
-        Ty::Char => "java/lang/Character",
-        Ty::Short => "java/lang/Short",
-        Ty::Int => "java/lang/Integer",
-        Ty::Long => "java/lang/Long",
-        Ty::Float => "java/lang/Float",
-        Ty::Double => "java/lang/Double",
-        _ => "java/lang/Object",
-    };
-    mw.visit_field_insn(opcodes::GETSTATIC, owner, "TYPE", "Ljava/lang/Class;");
+fn primitive_array_type_code(ty: &Ty) -> u8 {
+    match ty {
+        Ty::Boolean => 4,
+        Ty::Char => 5,
+        Ty::Float => 6,
+        Ty::Double => 7,
+        Ty::Byte => 8,
+        Ty::Short => 9,
+        Ty::Int => 10,
+        Ty::Long => 11,
+        _ => 10,
+    }
 }
 
 pub(crate) fn array_load_opcode(element_type: &Ty) -> u8 {

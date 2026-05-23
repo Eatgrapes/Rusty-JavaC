@@ -115,6 +115,11 @@ impl MethodWriter {
         self.inner.visit_type_insn(opcode, type_name);
     }
 
+    pub fn visit_new_array(&mut self, array_type: u8) {
+        self.inner
+            .visit_var_insn(rust_asm::opcodes::NEWARRAY, array_type as u16);
+    }
+
     pub fn visit_jump_insn(&mut self, opcode: u8, target: Label) {
         self.inner.visit_jump_insn(opcode, target);
     }
