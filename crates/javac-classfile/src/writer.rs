@@ -87,6 +87,12 @@ impl ClassFileWriter {
     }
 }
 
+impl Default for ClassFileWriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct MethodWriter {
     inner: MethodVisitor,
     name: String,

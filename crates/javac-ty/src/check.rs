@@ -26,27 +26,35 @@ pub fn is_assignable(from: &Ty, to: &Ty) -> bool {
 }
 
 fn is_widening_primitive(from: &Ty, to: &Ty) -> bool {
-    match (from, to) {
-        (Ty::Byte, Ty::Short | Ty::Int | Ty::Long | Ty::Float | Ty::Double) => true,
-        (Ty::Short, Ty::Int | Ty::Long | Ty::Float | Ty::Double) => true,
-        (Ty::Char, Ty::Int | Ty::Long | Ty::Float | Ty::Double) => true,
-        (Ty::Int, Ty::Long | Ty::Float | Ty::Double) => true,
-        (Ty::Long, Ty::Float | Ty::Double) => true,
-        (Ty::Float, Ty::Double) => true,
-        _ => false,
-    }
+    matches!(
+        (from, to),
+        (
+            Ty::Byte,
+            Ty::Short | Ty::Int | Ty::Long | Ty::Float | Ty::Double
+        ) | (Ty::Short, Ty::Int | Ty::Long | Ty::Float | Ty::Double)
+            | (Ty::Char, Ty::Int | Ty::Long | Ty::Float | Ty::Double)
+            | (Ty::Int, Ty::Long | Ty::Float | Ty::Double)
+            | (Ty::Long, Ty::Float | Ty::Double)
+            | (Ty::Float, Ty::Double)
+    )
 }
 
 pub fn is_narrowing_primitive(from: &Ty, to: &Ty) -> bool {
-    match (from, to) {
-        (Ty::Short, Ty::Byte | Ty::Char) => true,
-        (Ty::Char, Ty::Byte | Ty::Short) => true,
-        (Ty::Int, Ty::Byte | Ty::Short | Ty::Char) => true,
-        (Ty::Long, Ty::Byte | Ty::Short | Ty::Char | Ty::Int) => true,
-        (Ty::Float, Ty::Byte | Ty::Short | Ty::Char | Ty::Int | Ty::Long) => true,
-        (Ty::Double, Ty::Byte | Ty::Short | Ty::Char | Ty::Int | Ty::Long | Ty::Float) => true,
-        _ => false,
-    }
+    matches!(
+        (from, to),
+        (Ty::Short, Ty::Byte | Ty::Char)
+            | (Ty::Char, Ty::Byte | Ty::Short)
+            | (Ty::Int, Ty::Byte | Ty::Short | Ty::Char)
+            | (Ty::Long, Ty::Byte | Ty::Short | Ty::Char | Ty::Int)
+            | (
+                Ty::Float,
+                Ty::Byte | Ty::Short | Ty::Char | Ty::Int | Ty::Long
+            )
+            | (
+                Ty::Double,
+                Ty::Byte | Ty::Short | Ty::Char | Ty::Int | Ty::Long | Ty::Float
+            )
+    )
 }
 
 pub fn unboxing_type(ty: &Ty) -> Option<Ty> {

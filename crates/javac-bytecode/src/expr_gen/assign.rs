@@ -15,25 +15,26 @@ pub(super) fn emit_assign(
     op: &AssignOp,
     value: ExprId,
 ) {
-    if let Expr::Ident(name) = &body.exprs[target] {
-        if let Some(slot) = ctx.get_local(*name) {
-            emit_local_assign(mw, ctx, body, *name, slot, op, value);
-            return;
-        }
+    if let Expr::Ident(name) = &body.exprs[target]
+        && let Some(slot) = ctx.get_local(*name)
+    {
+        emit_local_assign(mw, ctx, body, *name, slot, op, value);
+        return;
     }
 
-    if let Expr::FieldAccess { target, field } = body.exprs[target].clone() {
-        if matches!(op, AssignOp::Plain) && super::values::is_current_instance(body, target) {
-            emit_instance_field_assign(mw, ctx, body, field, value);
-            return;
-        }
+    if let Expr::FieldAccess { target, field } = body.exprs[target].clone()
+        && matches!(op, AssignOp::Plain)
+        && super::values::is_current_instance(body, target)
+    {
+        emit_instance_field_assign(mw, ctx, body, field, value);
+        return;
     }
 
-    if let Expr::ArrayAccess { array, index } = body.exprs[target].clone() {
-        if matches!(op, AssignOp::Plain) {
-            emit_array_assign(mw, ctx, body, array, index, value);
-            return;
-        }
+    if let Expr::ArrayAccess { array, index } = body.exprs[target].clone()
+        && matches!(op, AssignOp::Plain)
+    {
+        emit_array_assign(mw, ctx, body, array, index, value);
+        return;
     }
 
     gen_expr(mw, ctx, body, value);

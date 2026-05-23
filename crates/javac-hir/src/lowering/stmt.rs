@@ -355,8 +355,7 @@ fn lower_while_stmt(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResul
 fn lower_do_stmt(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResult<StmtId> {
     let body_node = stmt
         .children()
-        .filter(is_statement_node)
-        .next()
+        .find(is_statement_node)
         .ok_or(LowerError::UnsupportedExpression)?;
     let loop_body = lower_stmt_as_branch(&body_node, body)?;
     let condition = body

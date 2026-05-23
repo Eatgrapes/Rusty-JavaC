@@ -96,7 +96,7 @@ fn gen_method(
         && let Some(block) = &method.root_block
     {
         mw.visit_code();
-        let mut ctx = CodegenCtx::new(writer, type_decl.name.clone(), catalog);
+        let mut ctx = CodegenCtx::new(writer, type_decl.name, catalog);
         ctx.set_super_name(ustr::Ustr::from(super_name));
         ctx.set_fields(&type_decl.fields);
         ctx.set_methods(&type_decl.methods);
@@ -193,7 +193,7 @@ fn gen_default_constructor(
 ) {
     let mut mw = writer.visit_method(javac_classfile::ACC_PUBLIC, INIT_METHOD, "()V");
     mw.visit_code();
-    let mut ctx = CodegenCtx::new(writer, type_decl.name.clone(), catalog);
+    let mut ctx = CodegenCtx::new(writer, type_decl.name, catalog);
     ctx.set_super_name(ustr::Ustr::from(super_name));
     ctx.set_fields(&type_decl.fields);
     ctx.set_methods(&type_decl.methods);

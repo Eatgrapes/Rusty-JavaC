@@ -5,3 +5,9 @@ impl ClassReader {
         Self
     }
 }
+
+impl Default for ClassReader {
+    fn default() -> Self {
+        Self::new()
+    }
+}

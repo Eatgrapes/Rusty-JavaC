@@ -15,3 +15,9 @@ impl CompilerConfig {
         }
     }
 }
+
+impl Default for CompilerConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}

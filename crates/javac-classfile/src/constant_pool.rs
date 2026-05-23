@@ -7,3 +7,9 @@ impl ConstantPool {
         Self
     }
 }
+
+impl Default for ConstantPool {
+    fn default() -> Self {
+        Self::new()
+    }
+}

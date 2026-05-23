@@ -159,11 +159,11 @@ fn source_start_range(source: &str) -> TextRange {
 
 fn line_range(source: &str, line: usize, needle: Option<&str>) -> TextRange {
     let (line_start, line_end) = line_byte_bounds(source, line);
-    if let Some(needle) = needle {
-        if let Some(relative_start) = source[line_start..line_end].find(needle) {
-            let start = line_start + relative_start;
-            return byte_range(start, start + needle.len());
-        }
+    if let Some(needle) = needle
+        && let Some(relative_start) = source[line_start..line_end].find(needle)
+    {
+        let start = line_start + relative_start;
+        return byte_range(start, start + needle.len());
     }
 
     let start = line_start;

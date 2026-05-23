@@ -87,17 +87,15 @@ pub(crate) fn unary_expr(p: &mut Parser) {
 
 pub(crate) fn cast_or_postfix_expr(p: &mut Parser) {
     use JavaSyntaxKind::*;
-    if p.at(LParen) {
-        if is_cast(p) {
-            let m = p.start();
-            p.expect(LParen);
-            ty::type_(p);
-            p.expect(RParen);
-            unary_expr(p);
-            m.complete(p, CastExpr);
-            postfix_suffix(p);
-            return;
-        }
+    if p.at(LParen) && is_cast(p) {
+        let m = p.start();
+        p.expect(LParen);
+        ty::type_(p);
+        p.expect(RParen);
+        unary_expr(p);
+        m.complete(p, CastExpr);
+        postfix_suffix(p);
+        return;
     }
     primary_expr(p);
     postfix_suffix(p);

@@ -29,17 +29,17 @@ pub(super) fn emit_field_access(
         return true;
     }
 
-    if values::is_current_instance(body, target) {
-        if let Some(ty) = ctx.field_ty(field) {
-            mw.visit_var_insn(opcodes::ALOAD, 0);
-            mw.visit_field_insn(
-                opcodes::GETFIELD,
-                ctx.class_name.as_str(),
-                field.as_str(),
-                &ty.descriptor(),
-            );
-            return true;
-        }
+    if values::is_current_instance(body, target)
+        && let Some(ty) = ctx.field_ty(field)
+    {
+        mw.visit_var_insn(opcodes::ALOAD, 0);
+        mw.visit_field_insn(
+            opcodes::GETFIELD,
+            ctx.class_name.as_str(),
+            field.as_str(),
+            &ty.descriptor(),
+        );
+        return true;
     }
 
     false

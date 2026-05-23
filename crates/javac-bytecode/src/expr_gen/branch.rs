@@ -95,6 +95,7 @@ enum BranchSense {
     False,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn emit_comparison_branch(
     mw: &mut MethodWriter,
     ctx: &mut CodegenCtx,
