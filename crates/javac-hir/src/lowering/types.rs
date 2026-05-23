@@ -97,6 +97,36 @@ impl TypeResolver {
         self.catalog.resolve_static_field(owner, name)
     }
 
+    pub fn resolve_class_reference(&self, name: &str) -> Option<String> {
+        if let Some(current_class) = self.current_class_name(name) {
+            return Some(current_class.to_string());
+        }
+
+        if name.contains('.') {
+            return self
+                .catalog
+                .resolve_qualified_name(name)
+                .map(str::to_string);
+        }
+
+        if let Some(internal) = self.exact_imports.get(name) {
+            return Some(internal.clone());
+        }
+
+        if let Some(internal) = self.catalog.resolve_java_lang(name) {
+            return Some(internal.to_string());
+        }
+
+        for package in &self.wildcard_imports {
+            let internal = format!("{package}/{name}");
+            if self.catalog.contains_internal_class(&internal) {
+                return Some(internal);
+            }
+        }
+
+        self.catalog.resolve_simple_name(name).map(str::to_string)
+    }
+
     fn add_import(&mut self, import: &Import) -> LowerResult<()> {
         let line = import.source_line.unwrap_or(1);
         if import.is_static {
@@ -129,7 +159,7 @@ impl TypeResolver {
 
     fn resolve_qualified_type(&self, name: &str, line: u16) -> LowerResult<Ty> {
         if let Some(internal) = self.catalog.resolve_qualified_name(name) {
-            return Ok(Ty::Class(Ustr::from(&internal)));
+            return Ok(Ty::Class(Ustr::from(internal)));
         }
 
         Err(LowerError::UnknownType {

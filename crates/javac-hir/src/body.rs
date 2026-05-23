@@ -16,6 +16,7 @@ impl Expr {
             Expr::This => Ty::object(),
             Expr::Super => Ty::object(),
             Expr::Ident(_) => Ty::Int,
+            Expr::ClassName(name) => Ty::Class(*name),
             Expr::FieldAccess { .. } => Ty::Int,
             Expr::MethodCall { .. } => Ty::Void,
             Expr::NewObject { class, .. } => class.clone(),

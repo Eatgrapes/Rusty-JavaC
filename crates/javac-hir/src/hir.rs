@@ -203,6 +203,7 @@ pub enum Expr {
     Super,
 
     Ident(Ustr),
+    ClassName(Ustr),
 
     FieldAccess {
         target: ExprId,

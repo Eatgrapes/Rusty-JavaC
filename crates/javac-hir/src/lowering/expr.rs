@@ -111,11 +111,12 @@ impl BodyBuilder {
             Expr::NullLiteral => Ty::object(),
             Expr::This | Expr::Super => Ty::object(),
             Expr::Ident(name) => self.local_ty(*name).unwrap_or(Ty::Int),
+            Expr::ClassName(name) => Ty::Class(*name),
             Expr::FieldAccess { target, field } => {
                 if let Some(owner) = self.static_class_name(*target)
                     && let Some(field_ref) = self
                         .type_resolver
-                        .resolve_static_field(owner, field.as_str())
+                        .resolve_static_field(owner.as_str(), field.as_str())
                 {
                     field_ref.ty
                 } else {
@@ -187,9 +188,9 @@ impl BodyBuilder {
             .map(|method| method.return_ty)
     }
 
-    fn static_class_name(&self, expr_id: ExprId) -> Option<&'static str> {
+    fn static_class_name(&self, expr_id: ExprId) -> Option<String> {
         match &self.body.exprs[expr_id] {
-            Expr::Ident(name) => javac_call_resolver::resolve_class_name(name.as_str()),
+            Expr::ClassName(name) => Some(name.to_string()),
             _ => None,
         }
     }
@@ -455,6 +456,17 @@ impl ExprLowerer<'_, '_> {
                 let name = Ustr::from(&name);
                 if self.body.pattern_name_is_out_of_scope(name) {
                     return Err(LowerError::PatternVariableOutOfScope(name.to_string()));
+                }
+                if self.peek_kind() == Some(JavaSyntaxKind::Dot)
+                    && self.body.local_ty(name).is_none()
+                    && let Some(class_name) = self
+                        .body
+                        .type_resolver
+                        .resolve_class_reference(name.as_str())
+                {
+                    return Ok(self
+                        .body
+                        .alloc_expr(Expr::ClassName(Ustr::from(&class_name))));
                 }
                 Ok(self.body.alloc_expr(Expr::Ident(name)))
             }

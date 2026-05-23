@@ -31,6 +31,7 @@ pub fn gen_expr(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, expr_i
         Expr::CharLiteral(value) => literals::emit_int(mw, *value as i64),
         Expr::This | Expr::Super => mw.visit_var_insn(opcodes::ALOAD, 0),
         Expr::Ident(name) => values::emit_name(mw, ctx, *name),
+        Expr::ClassName(_) => push_default_value(mw, &Ty::object()),
         Expr::FieldAccess { target, field } => {
             if !calls::emit_field_access(mw, ctx, body, *target, *field) {
                 discard_expr(mw, ctx, body, *target);

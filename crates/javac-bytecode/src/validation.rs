@@ -339,7 +339,8 @@ impl Validator {
             | Expr::StringLiteral(_)
             | Expr::NullLiteral
             | Expr::This
-            | Expr::Super => Ok(()),
+            | Expr::Super
+            | Expr::ClassName(_) => Ok(()),
             Expr::Ident(name) => self.validate_identifier(scope, *name),
         }
     }
@@ -470,6 +471,7 @@ impl Validator {
                 .cloned()
                 .or_else(|| self.fields.get(name).map(|field| field.ty.clone()))
                 .unwrap_or_else(|| body.exprs[expr_id].ty(&body.exprs)),
+            Expr::ClassName(name) => Ty::Class(*name),
             Expr::FieldAccess { target, field } => {
                 if let Some(owner) = static_class_name(body, *target)
                     && let Some(field_ref) =
@@ -550,9 +552,9 @@ fn case_stmts(case: &SwitchCase) -> &[StmtId] {
     }
 }
 
-fn static_class_name(body: &Body, expr_id: ExprId) -> Option<&'static str> {
+fn static_class_name(body: &Body, expr_id: ExprId) -> Option<&str> {
     match &body.exprs[expr_id] {
-        Expr::Ident(name) => javac_call_resolver::resolve_class_name(name.as_str()),
+        Expr::ClassName(name) => Some(name.as_str()),
         _ => None,
     }
 }
