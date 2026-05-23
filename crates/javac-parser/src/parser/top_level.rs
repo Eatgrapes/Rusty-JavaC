@@ -46,7 +46,7 @@ pub(crate) fn import_decl(p: &mut Parser) {
     p.expect(ImportKw);
     p.eat(StaticKw);
     qualified_name(p);
-    if p.eat(Star) {}
+    p.eat(Star);
     p.expect(Semi);
     m.complete(p, ImportDecl);
 }

@@ -187,46 +187,40 @@ pub(crate) fn switch_expr(p: &mut Parser) {
 pub(crate) fn switch_label(p: &mut Parser) {
     use JavaSyntaxKind::*;
     let m = p.start();
-    if p.eat(CaseKw) {
+    let is_default = !p.eat(CaseKw);
+    if is_default {
+        p.expect(DefaultKw);
+    } else {
         expr::expr(p);
-        if p.eat(Colon) {
-            while !p.at_any(&[CaseKw, DefaultKw, RBrace]) && p.kind() != Error {
-                stmt(p);
-            }
+    }
+    if p.eat(Colon) {
+        let stop = if is_default {
+            &[CaseKw, RBrace][..]
         } else {
-            p.expect(Arrow);
-            let rm = p.start();
-            if p.at(ThrowKw) {
-                stmt(p);
-            } else if p.at(LBrace) {
-                block(p);
-            } else {
-                expr::expr(p);
-                p.eat(Semi);
-            }
-            rm.complete(p, SwitchRule);
+            &[CaseKw, DefaultKw, RBrace][..]
+        };
+        while !p.at_any(stop) && p.kind() != Error {
+            stmt(p);
         }
     } else {
-        p.expect(DefaultKw);
-        if p.eat(Colon) {
-            while !p.at_any(&[CaseKw, RBrace]) && p.kind() != Error {
-                stmt(p);
-            }
-        } else {
-            p.expect(Arrow);
-            let rm = p.start();
-            if p.at(ThrowKw) {
-                stmt(p);
-            } else if p.at(LBrace) {
-                block(p);
-            } else {
-                expr::expr(p);
-                p.eat(Semi);
-            }
-            rm.complete(p, SwitchRule);
-        }
+        p.expect(Arrow);
+        switch_arrow_body(p);
     }
     m.complete(p, SwitchLabel);
+}
+
+fn switch_arrow_body(p: &mut Parser) {
+    use JavaSyntaxKind::*;
+    let rm = p.start();
+    if p.at(ThrowKw) {
+        stmt(p);
+    } else if p.at(LBrace) {
+        block(p);
+    } else {
+        expr::expr(p);
+        p.eat(Semi);
+    }
+    rm.complete(p, SwitchRule);
 }
 
 pub(crate) fn try_stmt(p: &mut Parser) {

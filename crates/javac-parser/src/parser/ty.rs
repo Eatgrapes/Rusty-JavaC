@@ -3,17 +3,7 @@ use crate::parser::{JavaSyntaxKind, Parser};
 pub(crate) fn type_(p: &mut Parser) {
     use JavaSyntaxKind::*;
     let m = p.start();
-    if p.at(VarKw) {
-        p.bump();
-    } else if p.at_any(&[
-        IntKw, LongKw, ShortKw, ByteKw, CharKw, FloatKw, DoubleKw, BooleanKw, VoidKw,
-    ]) {
-        let pm = p.start();
-        p.bump();
-        pm.complete(p, PrimitiveType);
-    } else {
-        class_type(p);
-    }
+    type_base(p);
     while p.at(LBrack) {
         p.bump();
         p.expect(RBrack);
@@ -24,6 +14,12 @@ pub(crate) fn type_(p: &mut Parser) {
 pub(crate) fn type_no_array(p: &mut Parser) {
     use JavaSyntaxKind::*;
     let m = p.start();
+    type_base(p);
+    m.complete(p, Type);
+}
+
+fn type_base(p: &mut Parser) {
+    use JavaSyntaxKind::*;
     if p.at(VarKw) {
         p.bump();
     } else if p.at_any(&[
@@ -35,7 +31,6 @@ pub(crate) fn type_no_array(p: &mut Parser) {
     } else {
         class_type(p);
     }
-    m.complete(p, Type);
 }
 
 pub(crate) fn class_type(p: &mut Parser) {
