@@ -55,11 +55,10 @@ pub(crate) fn class_member(p: &mut Parser) {
 
 pub(crate) fn is_constructor(p: &Parser) -> bool {
     let mut la = p.lookahead();
-    la.at(JavaSyntaxKind::Ident)
-        && {
-            la.advance();
-            la.at(JavaSyntaxKind::LParen) || la.at(JavaSyntaxKind::LBrace)
-        }
+    la.at(JavaSyntaxKind::Ident) && {
+        la.advance();
+        la.at(JavaSyntaxKind::LParen) || la.at(JavaSyntaxKind::LBrace)
+    }
 }
 
 pub(crate) fn constructor_decl(p: &mut Parser) {

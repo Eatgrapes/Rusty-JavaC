@@ -352,13 +352,17 @@ impl ExprLowerer<'_, '_> {
                 self.pos += 1;
                 Ok(self
                     .body
-                    .alloc_expr(Expr::FloatLiteral(literal::parse_float_literal(&token.text))))
+                    .alloc_expr(Expr::FloatLiteral(literal::parse_float_literal(
+                        &token.text,
+                    ))))
             }
             JavaSyntaxKind::DoubleLiteral => {
                 self.pos += 1;
                 Ok(self
                     .body
-                    .alloc_expr(Expr::DoubleLiteral(literal::parse_double_literal(&token.text))))
+                    .alloc_expr(Expr::DoubleLiteral(literal::parse_double_literal(
+                        &token.text,
+                    ))))
             }
             JavaSyntaxKind::CharLiteral => {
                 self.pos += 1;

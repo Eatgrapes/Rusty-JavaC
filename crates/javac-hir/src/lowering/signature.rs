@@ -329,4 +329,3 @@ impl TypeSignatureParser<'_> {
         Ok(text)
     }
 }
-
