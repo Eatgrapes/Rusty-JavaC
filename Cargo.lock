@@ -114,6 +114,7 @@ dependencies = [
  "javac-lexer",
  "javac-parser",
  "javac-ty",
+ "text-size",
 ]
 
 [[package]]

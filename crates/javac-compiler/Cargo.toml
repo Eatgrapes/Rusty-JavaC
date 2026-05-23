@@ -13,3 +13,4 @@ javac-ty = { path = "../javac-ty" }
 javac-bytecode = { path = "../javac-bytecode" }
 javac-classfile = { path = "../javac-classfile" }
 javac-diagnostics = { path = "../javac-diagnostics" }
+text-size = { workspace = true }

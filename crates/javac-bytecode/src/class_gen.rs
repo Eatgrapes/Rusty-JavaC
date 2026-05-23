@@ -1,4 +1,5 @@
 use crate::codegen::CodegenCtx;
+use crate::error::BytecodeError;
 use javac_classfile::ClassFileWriter;
 use javac_hir::hir::*;
 use javac_ty::Ty;
@@ -8,16 +9,16 @@ const JAVA_VERSION: u32 = 21;
 const OBJECT_CLASS: &str = "java/lang/Object";
 const INIT_METHOD: &str = "<init>";
 
-pub fn gen_class(unit: &CompilationUnit) -> Result<Vec<u8>, String> {
+pub fn gen_class(unit: &CompilationUnit) -> Result<Vec<u8>, BytecodeError> {
     let type_decl = unit
         .type_decls
         .first()
-        .ok_or_else(|| "no type declarations".to_string())?;
+        .ok_or_else(|| BytecodeError::new("no type declarations"))?;
     crate::validation::validate_type_decl(type_decl)?;
 
     let mut writer = ClassFileWriter::new();
     gen_type_decl(&mut writer, type_decl);
-    writer.to_bytes()
+    writer.to_bytes().map_err(BytecodeError::new)
 }
 
 fn gen_type_decl(writer: &mut ClassFileWriter, type_decl: &TypeDecl) {
