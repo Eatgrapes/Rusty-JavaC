@@ -4,11 +4,12 @@ use javac_compiler::pipeline::compile;
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() {
-        eprintln!("usage: compiler-example [--output-dir <dir>] <source1.java> <source2.java> ...");
+        print_usage();
         std::process::exit(2);
     }
 
     let mut output_dir = "target/compiler-example".to_string();
+    let mut classpath: Vec<String> = Vec::new();
     let mut sources: Vec<String> = Vec::new();
     let mut i = 0;
     while i < args.len() {
@@ -22,6 +23,15 @@ fn main() {
                 output_dir = args[i].clone();
                 i += 1;
             }
+            "--class-path" | "--classpath" | "-classpath" | "-cp" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("error: {} requires a value", args[i - 1]);
+                    std::process::exit(2);
+                }
+                classpath.push(args[i].clone());
+                i += 1;
+            }
             arg => {
                 sources.push(arg.to_string());
                 i += 1;
@@ -30,12 +40,13 @@ fn main() {
     }
 
     if sources.is_empty() {
-        eprintln!("usage: compiler-example [--output-dir <dir>] <source1.java> <source2.java> ...");
+        print_usage();
         std::process::exit(2);
     }
 
     let mut config = CompilerConfig::new();
     config.output_dir = output_dir;
+    config.classpath = classpath;
     config.source_files = sources;
 
     if let Err(errors) = compile(config) {
@@ -44,4 +55,10 @@ fn main() {
         }
         std::process::exit(1);
     }
+}
+
+fn print_usage() {
+    eprintln!(
+        "usage: compiler-example [--output-dir <dir>] [--class-path <path>] <source1.java> <source2.java> ..."
+    );
 }
