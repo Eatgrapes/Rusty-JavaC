@@ -129,6 +129,10 @@ pub enum Stmt {
     Throw(ExprId),
     Break(Option<Ustr>),
     Continue(Option<Ustr>),
+    Switch {
+        selector: ExprId,
+        cases: Vec<SwitchCase>,
+    },
     Try(TryStmt),
     Synchronized(ExprId, Block),
     Assert {

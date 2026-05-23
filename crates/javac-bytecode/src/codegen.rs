@@ -81,6 +81,12 @@ impl<'a> CodegenCtx<'a> {
         slot
     }
 
+    pub fn alloc_temp(&mut self, ty: &Ty) -> u16 {
+        let slot = self.next_local;
+        self.next_local += ty.size() as u16;
+        slot
+    }
+
     pub fn get_local(&self, name: Ustr) -> Option<u16> {
         self.locals.get(&name).copied()
     }

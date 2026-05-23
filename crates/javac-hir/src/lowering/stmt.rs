@@ -37,12 +37,17 @@ fn lower_stmt_nodes(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResul
         JavaSyntaxKind::LocalVarDecl => lower_local_var_decl(stmt, body)?,
         JavaSyntaxKind::ExprStmt => lower_expr_stmt(stmt, body)?.into_iter().collect(),
         JavaSyntaxKind::ReturnStmt => vec![lower_return_stmt(stmt, body)?],
+        JavaSyntaxKind::ThrowStmt => vec![lower_throw_stmt(stmt, body)?],
         JavaSyntaxKind::IfStmt => vec![lower_if_stmt(stmt, body)?],
+        JavaSyntaxKind::SwitchStmt => vec![lower_switch_stmt(stmt, body)?],
         JavaSyntaxKind::Block => {
             let block = lower_block(stmt, body)?;
             vec![body.alloc_stmt_at(Stmt::Block(block), source_line(stmt))]
         }
         JavaSyntaxKind::EmptyStmt => vec![body.alloc_stmt_at(Stmt::Empty, source_line(stmt))],
+        JavaSyntaxKind::BreakStmt => vec![lower_break_stmt(stmt, body)],
+        JavaSyntaxKind::ContinueStmt => vec![lower_continue_stmt(stmt, body)],
+        JavaSyntaxKind::YieldStmt => vec![lower_yield_stmt(stmt, body)?],
         _ => Vec::new(),
     };
     Ok(lowered)
@@ -125,6 +130,30 @@ fn lower_return_stmt(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResu
     Ok(body.alloc_stmt_at(Stmt::Return(expr), source_line(stmt)))
 }
 
+fn lower_break_stmt(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> StmtId {
+    body.alloc_stmt_at(Stmt::Break(optional_label(stmt)), source_line(stmt))
+}
+
+fn lower_continue_stmt(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> StmtId {
+    body.alloc_stmt_at(Stmt::Continue(optional_label(stmt)), source_line(stmt))
+}
+
+fn lower_yield_stmt(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResult<StmtId> {
+    let tokens = tokens_after_keyword(stmt, JavaSyntaxKind::YieldKw);
+    let expr = body
+        .lower_expr_tokens(&tokens)?
+        .ok_or(LowerError::UnsupportedExpression)?;
+    Ok(body.alloc_stmt_at(Stmt::Yield(expr), source_line(stmt)))
+}
+
+fn lower_throw_stmt(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResult<StmtId> {
+    let tokens = tokens_after_keyword(stmt, JavaSyntaxKind::ThrowKw);
+    let expr = body
+        .lower_expr_tokens(&tokens)?
+        .ok_or(LowerError::UnsupportedExpression)?;
+    Ok(body.alloc_stmt_at(Stmt::Throw(expr), source_line(stmt)))
+}
+
 fn lower_if_stmt(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResult<StmtId> {
     let condition = body
         .lower_expr_tokens(&tokens_in_first_parens(stmt)?)?
@@ -160,16 +189,8 @@ fn lower_switch_expr(switch: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerRe
     let selector = body
         .lower_expr_tokens(&tokens_in_first_parens(switch)?)?
         .ok_or(LowerError::UnsupportedExpression)?;
-    let mut cases = Vec::new();
     let mut ty = None;
-
-    for label in switch
-        .descendants()
-        .filter(|node| node.kind() == JavaSyntaxKind::SwitchLabel)
-    {
-        let case = lower_switch_label(&label, body, &mut ty)?;
-        cases.push(case);
-    }
+    let cases = lower_switch_cases(switch, body, &mut ty)?;
 
     let ty = ty.unwrap_or_else(|| Ty::Class(Ustr::from("java/lang/Object")));
     Ok(body.alloc_expr(Expr::Switch {
@@ -179,25 +200,64 @@ fn lower_switch_expr(switch: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerRe
     }))
 }
 
+fn lower_switch_stmt(switch: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResult<StmtId> {
+    let selector = body
+        .lower_expr_tokens(&tokens_in_first_parens(switch)?)?
+        .ok_or(LowerError::UnsupportedExpression)?;
+    let mut ty = None;
+    let cases = lower_switch_cases(switch, body, &mut ty)?;
+
+    Ok(body.alloc_stmt_at(Stmt::Switch { selector, cases }, source_line(switch)))
+}
+
+fn lower_switch_cases(
+    switch: &JavaSyntaxNode,
+    body: &mut BodyBuilder,
+    switch_ty: &mut Option<Ty>,
+) -> LowerResult<Vec<SwitchCase>> {
+    switch
+        .children()
+        .find(|node| node.kind() == JavaSyntaxKind::SwitchBlock)
+        .into_iter()
+        .flat_map(|block| block.children())
+        .filter(|node| node.kind() == JavaSyntaxKind::SwitchLabel)
+        .map(|label| lower_switch_label(&label, body, switch_ty))
+        .collect()
+}
+
 fn lower_switch_label(
     label: &JavaSyntaxNode,
     body: &mut BodyBuilder,
     switch_ty: &mut Option<Ty>,
 ) -> LowerResult<SwitchCase> {
-    let rule = label
+    if let Some(rule) = label
         .children()
         .find(|child| child.kind() == JavaSyntaxKind::SwitchRule)
-        .ok_or(LowerError::UnsupportedExpression)?;
-    let value = body
-        .lower_expr_tokens(&expr_tokens(&rule))?
-        .ok_or(LowerError::UnsupportedExpression)?;
-    switch_ty.get_or_insert_with(|| body.expr_ty(value));
-    let rule_body = vec![body.alloc_stmt_at(Stmt::Yield(value), source_line(&rule))];
+    {
+        let rule_body = lower_switch_rule(&rule, body, switch_ty)?;
 
-    if has_token(label, JavaSyntaxKind::DefaultKw) {
-        return Ok(SwitchCase::Default {
+        if has_token(label, JavaSyntaxKind::DefaultKw) {
+            return Ok(SwitchCase::Default {
+                body: rule_body,
+                is_arrow: true,
+            });
+        }
+
+        let pattern = body
+            .lower_expr_tokens(&case_pattern_tokens(label))?
+            .ok_or(LowerError::UnsupportedExpression)?;
+        return Ok(SwitchCase::Case {
+            pattern,
             body: rule_body,
             is_arrow: true,
+        });
+    }
+
+    let case_body = lower_switch_colon_body(label, body)?;
+    if has_token(label, JavaSyntaxKind::DefaultKw) {
+        return Ok(SwitchCase::Default {
+            body: case_body,
+            is_arrow: false,
         });
     }
 
@@ -206,9 +266,54 @@ fn lower_switch_label(
         .ok_or(LowerError::UnsupportedExpression)?;
     Ok(SwitchCase::Case {
         pattern,
-        body: rule_body,
-        is_arrow: true,
+        body: case_body,
+        is_arrow: false,
     })
+}
+
+fn lower_switch_rule(
+    rule: &JavaSyntaxNode,
+    body: &mut BodyBuilder,
+    switch_ty: &mut Option<Ty>,
+) -> LowerResult<Vec<StmtId>> {
+    if let Some(block) = rule
+        .children()
+        .find(|child| child.kind() == JavaSyntaxKind::Block)
+    {
+        let block = lower_block(&block, body)?;
+        return Ok(vec![
+            body.alloc_stmt_at(Stmt::Block(block), source_line(rule))
+        ]);
+    }
+
+    let mut stmts = Vec::new();
+    for child in rule.children().filter(is_statement_node) {
+        stmts.extend(lower_stmt_nodes(&child, body)?);
+    }
+    if !stmts.is_empty() {
+        return Ok(stmts);
+    }
+
+    let value = body
+        .lower_expr_tokens(&expr_tokens(rule))?
+        .ok_or(LowerError::UnsupportedExpression)?;
+    switch_ty.get_or_insert_with(|| body.expr_ty(value));
+    Ok(vec![
+        body.alloc_stmt_at(Stmt::Yield(value), source_line(rule))
+    ])
+}
+
+fn lower_switch_colon_body(
+    label: &JavaSyntaxNode,
+    body: &mut BodyBuilder,
+) -> LowerResult<Vec<StmtId>> {
+    let mut stmts = Vec::new();
+    body.enter_scope();
+    for child in label.children().filter(is_statement_node) {
+        stmts.extend(lower_stmt_nodes(&child, body)?);
+    }
+    body.exit_scope();
+    Ok(stmts)
 }
 
 fn is_statement_node(node: &JavaSyntaxNode) -> bool {
@@ -223,6 +328,8 @@ fn is_statement_node(node: &JavaSyntaxNode) -> bool {
             | JavaSyntaxKind::ThrowStmt
             | JavaSyntaxKind::BreakStmt
             | JavaSyntaxKind::ContinueStmt
+            | JavaSyntaxKind::SwitchStmt
+            | JavaSyntaxKind::YieldStmt
     )
 }
 
@@ -230,4 +337,11 @@ fn has_token(node: &JavaSyntaxNode, kind: JavaSyntaxKind) -> bool {
     node.children_with_tokens()
         .filter_map(|element| element.into_token())
         .any(|token| token.kind() == kind)
+}
+
+fn optional_label(node: &JavaSyntaxNode) -> Option<Ustr> {
+    node.children_with_tokens()
+        .filter_map(|element| element.into_token())
+        .find(|token| token.kind() == JavaSyntaxKind::Ident)
+        .map(|token| Ustr::from(token.text()))
 }

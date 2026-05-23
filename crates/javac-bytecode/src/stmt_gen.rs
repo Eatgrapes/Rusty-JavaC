@@ -147,6 +147,9 @@ pub fn gen_stmt(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, stmt_i
                 mw.visit_jump_insn(opcodes::GOTO, *label);
             }
         }
+        Stmt::Switch { selector, cases } => {
+            crate::expr_gen::switch::emit_switch_stmt(mw, ctx, body, *selector, cases);
+        }
         _ => {}
     }
 }
@@ -219,6 +222,12 @@ fn stmt_definitely_exits(body: &Body, stmt_id: StmtId) -> bool {
             else_branch: Some(else_branch),
             ..
         } => stmt_definitely_exits(body, *then_branch) && stmt_definitely_exits(body, *else_branch),
+        Stmt::Switch { cases, .. } => cases.iter().any(|case| match case {
+            SwitchCase::Case { body: stmts, .. } | SwitchCase::Default { body: stmts, .. } => stmts
+                .last()
+                .map(|stmt| stmt_definitely_exits(body, *stmt))
+                .unwrap_or(false),
+        }),
         _ => false,
     }
 }

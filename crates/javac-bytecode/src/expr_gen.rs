@@ -3,7 +3,7 @@ mod calls;
 mod convert;
 mod literals;
 mod ops;
-mod switch;
+pub(crate) mod switch;
 mod types;
 mod values;
 
