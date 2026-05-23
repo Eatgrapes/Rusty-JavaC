@@ -4,21 +4,24 @@ import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
+import org.gradle.api.tasks.Classpath
 import org.gradle.api.tasks.Input
-import org.gradle.api.tasks.InputFiles
 import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.SkipWhenEmpty
 import org.gradle.api.tasks.TaskAction
+import org.gradle.work.DisableCachingByDefault
 
+@DisableCachingByDefault(because = "RustyJavaC is an external process, caching not applicable")
 abstract class CompileRustyJavaCTask : DefaultTask() {
 
-    @get:InputFiles
+    @get:Classpath
     @get:SkipWhenEmpty
     abstract val sourceFiles: ConfigurableFileCollection
 
     @get:Input
-    abstract val binaryPath: Property<String>
+    abstract val command: ListProperty<String>
 
     @get:Input
     abstract val javaVersion: Property<Int>
@@ -31,22 +34,30 @@ abstract class CompileRustyJavaCTask : DefaultTask() {
         val output = outputDir.get().asFile
         output.mkdirs()
 
-        val sources = sourceFiles.files.map { it.absolutePath }
+        val sources = sourceFiles.files.flatMap { file ->
+            if (file.isDirectory) {
+                file.walkTopDown().filter { it.isFile && it.extension == "java" }.toList()
+            } else if (file.extension == "java") {
+                listOf(file)
+            } else {
+                emptyList()
+            }
+        }.map { it.absolutePath }
         if (sources.isEmpty()) {
             logger.lifecycle("No Java source files found, skipping RustyJavaC compilation")
             return
         }
 
-        val command = mutableListOf(
-            binaryPath.get(),
-            "--output-dir", output.absolutePath
-        )
-        command.addAll(sources)
+        val cmd = mutableListOf<String>()
+        cmd.addAll(command.get())
+        cmd.add("--output-dir")
+        cmd.add(output.absolutePath)
+        cmd.addAll(sources)
 
         logger.lifecycle("RustyJavaC: compiling ${sources.size} source file(s)")
-        logger.info("  command: ${command.joinToString(" ")}")
+        logger.info("  command: ${cmd.joinToString(" ")}")
 
-        val process = ProcessBuilder(command)
+        val process = ProcessBuilder(cmd)
             .redirectErrorStream(true)
             .start()
 

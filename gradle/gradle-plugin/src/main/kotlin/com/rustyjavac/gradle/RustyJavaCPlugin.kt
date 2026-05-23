@@ -2,7 +2,6 @@ package com.rustyjavac.gradle
 
 import org.gradle.api.Plugin
 import org.gradle.api.Project
-import org.gradle.api.plugins.JavaPluginExtension
 import org.gradle.api.tasks.bundling.Jar
 
 class RustyJavaCPlugin : Plugin<Project> {
@@ -13,7 +12,7 @@ class RustyJavaCPlugin : Plugin<Project> {
             RustyJavaCExtension::class.java
         )
 
-        extension.binaryPath.convention("rustyjavac")
+        extension.command.convention(listOf("rustyjavac"))
         extension.javaVersion.convention(21)
 
         project.plugins.withId("java") {
@@ -25,10 +24,10 @@ class RustyJavaCPlugin : Plugin<Project> {
         project: Project,
         extension: RustyJavaCExtension
     ) {
-        val javaExt = project.extensions.getByType(JavaPluginExtension::class.java)
+        val javaExt = project.extensions.getByType(org.gradle.api.plugins.JavaPluginExtension::class.java)
 
         javaExt.sourceSets.all { sourceSet ->
-            if (sourceSet.name == JavaPluginExtension.TEST_SOURCE_SET_NAME) {
+            if (sourceSet.name == "test") {
                 return@all
             }
 
@@ -38,7 +37,7 @@ class RustyJavaCPlugin : Plugin<Project> {
 
             val compileTask = project.tasks.register(compileTaskName, CompileRustyJavaCTask::class.java) {
                 it.sourceFiles.setFrom(sourceSet.java.srcDirs)
-                it.binaryPath.set(extension.binaryPath)
+                it.command.set(extension.command)
                 it.javaVersion.set(extension.javaVersion)
                 it.outputDir.set(classesDir)
                 it.description = "Compiles ${sourceSet.name} Java sources using RustyJavaC"

@@ -4,5 +4,7 @@
 .idea
 
 # Gradle
-gradle-plugin/.gradle
-gradle-plugin/build
+gradle/gradle-plugin/.gradle
+gradle/gradle-plugin/build
+gradle/demo/.gradle
+gradle/demo/build
