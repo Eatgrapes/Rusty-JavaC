@@ -165,10 +165,17 @@ pub enum SwitchCase {
 
 #[derive(Debug, Clone)]
 pub struct TryStmt {
-    pub resources: Vec<ExprId>,
+    pub resources: Vec<TryResource>,
     pub body: Block,
     pub catches: Vec<CatchClause>,
     pub finally: Option<Block>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TryResource {
+    pub ty: Ty,
+    pub name: Ustr,
+    pub initializer: Option<ExprId>,
 }
 
 #[derive(Debug, Clone)]

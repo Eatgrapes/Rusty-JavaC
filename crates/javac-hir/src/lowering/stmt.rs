@@ -362,18 +362,23 @@ fn lower_do_stmt(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResult<S
 }
 
 fn lower_try_stmt(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResult<StmtId> {
-    if stmt
+    let resources_node = stmt
         .children()
-        .any(|child| child.kind() == JavaSyntaxKind::TryWithResources)
-    {
-        return Ok(body.alloc_stmt_at(Stmt::Empty, source_line(stmt)));
-    }
+        .find(|child| child.kind() == JavaSyntaxKind::TryWithResources);
 
     let try_block = stmt
         .children()
         .find(|child| child.kind() == JavaSyntaxKind::Block)
         .ok_or(LowerError::UnsupportedExpression)?;
-    let try_body = lower_block(&try_block, body)?;
+    let (resources, try_body) = if let Some(resources_node) = resources_node {
+        body.enter_scope();
+        let resources = lower_try_resources(&resources_node, body)?;
+        let try_body = lower_block(&try_block, body)?;
+        body.exit_scope();
+        (resources, try_body)
+    } else {
+        (Vec::new(), lower_block(&try_block, body)?)
+    };
     let catches = stmt
         .children()
         .filter(|child| child.kind() == JavaSyntaxKind::CatchClause)
@@ -387,13 +392,49 @@ fn lower_try_stmt(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResult<
 
     Ok(body.alloc_stmt_at(
         Stmt::Try(TryStmt {
-            resources: Vec::new(),
+            resources,
             body: try_body,
             catches,
             finally,
         }),
         source_line(stmt),
     ))
+}
+
+fn lower_try_resources(
+    resources: &JavaSyntaxNode,
+    body: &mut BodyBuilder,
+) -> LowerResult<Vec<TryResource>> {
+    resources
+        .children()
+        .filter(|child| child.kind() == JavaSyntaxKind::Resource)
+        .map(|resource| lower_try_resource(&resource, body))
+        .collect()
+}
+
+fn lower_try_resource(
+    resource: &JavaSyntaxNode,
+    body: &mut BodyBuilder,
+) -> LowerResult<TryResource> {
+    let declared_ty = resource
+        .children()
+        .find(|child| child.kind() == JavaSyntaxKind::Type)
+        .ok_or(LowerError::MissingType)?;
+    let explicit_ty = lower_type(&declared_ty)?;
+    let initializer = if let Some(tokens) = initializer_tokens(resource) {
+        body.lower_expr_tokens(&tokens)?
+    } else {
+        None
+    };
+    let ty = local_var_type(is_var_type(&declared_ty), &explicit_ty, initializer, body);
+    let name = resource_var_name(resource)?;
+    body.define_local(name, ty.clone());
+
+    Ok(TryResource {
+        ty,
+        name,
+        initializer,
+    })
 }
 
 fn lower_catch_clause(clause: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerResult<CatchClause> {
@@ -687,6 +728,17 @@ fn catch_var_name(clause: &JavaSyntaxNode) -> LowerResult<Ustr> {
         .descendants_with_tokens()
         .filter_map(|element| element.into_token())
         .take_while(|token| token.kind() != JavaSyntaxKind::RParen)
+        .filter(|token| token.kind() == JavaSyntaxKind::Ident)
+        .last()
+        .map(|token| Ustr::from(token.text()))
+        .ok_or(LowerError::MissingMethodName)
+}
+
+fn resource_var_name(resource: &JavaSyntaxNode) -> LowerResult<Ustr> {
+    resource
+        .descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .take_while(|token| token.kind() != JavaSyntaxKind::Eq)
         .filter(|token| token.kind() == JavaSyntaxKind::Ident)
         .last()
         .map(|token| Ustr::from(token.text()))
