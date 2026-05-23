@@ -37,7 +37,7 @@ fn gen_type_decl(writer: &mut ClassFileWriter, type_decl: &TypeDecl) {
 
     gen_fields(writer, &type_decl.fields);
     if needs_default_constructor(type_decl) {
-        gen_default_constructor(writer, &super_name);
+        gen_default_constructor(writer, type_decl, &super_name);
     }
     gen_methods(writer, type_decl, &super_name);
 }
@@ -161,9 +161,13 @@ fn needs_default_constructor(type_decl: &TypeDecl) -> bool {
             .any(|method| method.name == INIT_METHOD)
 }
 
-fn gen_default_constructor(writer: &mut ClassFileWriter, super_name: &str) {
+fn gen_default_constructor(writer: &mut ClassFileWriter, type_decl: &TypeDecl, super_name: &str) {
     let mut mw = writer.visit_method(javac_classfile::ACC_PUBLIC, INIT_METHOD, "()V");
     mw.visit_code();
+    let mut ctx = CodegenCtx::new(writer, type_decl.name.clone());
+    ctx.set_super_name(ustr::Ustr::from(super_name));
+    ctx.set_fields(&type_decl.fields);
+    ctx.set_methods(&type_decl.methods);
     mw.visit_var_insn(opcodes::ALOAD, 0);
     mw.visit_method_insn(
         opcodes::INVOKESPECIAL,
@@ -172,7 +176,34 @@ fn gen_default_constructor(writer: &mut ClassFileWriter, super_name: &str) {
         "()V",
         false,
     );
+    emit_instance_field_initializers(&mut mw, &mut ctx, &type_decl.fields);
     mw.visit_insn(opcodes::RETURN);
     mw.visit_maxs(0, 0);
     mw.visit_end(writer);
+}
+
+fn emit_instance_field_initializers(
+    mw: &mut javac_classfile::MethodWriter,
+    ctx: &mut CodegenCtx,
+    fields: &[FieldDecl],
+) {
+    for field in fields {
+        if field.access_flags & javac_classfile::ACC_STATIC != 0 {
+            continue;
+        }
+        let Some(initializer) = field.initializer else {
+            continue;
+        };
+
+        mw.visit_var_insn(opcodes::ALOAD, 0);
+        crate::expr_gen::gen_expr(mw, ctx, &field.body, initializer);
+        let value_ty = crate::expr_gen::expr_ty(ctx, &field.body, initializer);
+        crate::expr_gen::coerce(mw, &value_ty, &field.ty);
+        mw.visit_field_insn(
+            opcodes::PUTFIELD,
+            ctx.class_name.as_str(),
+            field.name.as_str(),
+            &field.ty.descriptor(),
+        );
+    }
 }

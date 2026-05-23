@@ -1,5 +1,5 @@
 use crate::hir::*;
-use crate::lowering::member::lower_class_methods;
+use crate::lowering::member::lower_class_members;
 use crate::lowering::modifiers::access_flags;
 use crate::lowering::signature::{class_signature, lower_type_params};
 use crate::lowering::syntax::qualified_name_text;
@@ -85,9 +85,9 @@ fn lower_class_decl(
     let internal_name = internal_class_name(package, name.text());
     let type_params = lower_type_params(class.syntax())?;
     let generic_signature = class_signature(class.syntax(), &type_params)?;
-    let methods = class
+    let members = class
         .body()
-        .map(|body| lower_class_methods(body, &type_params))
+        .map(|body| lower_class_members(body, &type_params))
         .transpose()?
         .unwrap_or_default();
 
@@ -100,8 +100,8 @@ fn lower_class_decl(
         interfaces: Vec::new(),
         type_params,
         generic_signature,
-        fields: Vec::new(),
-        methods,
+        fields: members.fields,
+        methods: members.methods,
         inner_types: Vec::new(),
     })
 }
