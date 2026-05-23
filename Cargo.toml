@@ -22,6 +22,7 @@ license = "MIT"
 authors = ["Eatgrapes"]
 repository = "https://github.com/Eatgrapes/Rusty-JavaC"
 description = "A Java compiler written in Rust."
+readme = "README.md"
 keywords = ["java", "compiler", "jvm", "bytecode", "parser"]
 categories = ["compilers"]
 
