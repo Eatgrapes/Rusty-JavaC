@@ -1,6 +1,11 @@
+mod diagnostic;
+mod scope;
+
 use crate::error::BytecodeError;
+use diagnostic::{display_internal_name, unresolved_field, unresolved_method, unresolved_variable};
 use javac_hir::hir::*;
 use javac_ty::{MethodSig, Ty};
+use scope::MethodScope;
 use std::collections::HashMap;
 use ustr::Ustr;
 
@@ -28,12 +33,6 @@ struct Validator {
 #[derive(Clone)]
 struct FieldInfo {
     ty: Ty,
-}
-
-#[derive(Clone)]
-struct MethodScope {
-    locals: HashMap<Ustr, Ty>,
-    line: Option<u16>,
 }
 
 impl Validator {
@@ -355,7 +354,7 @@ impl Validator {
         if scope.locals.contains_key(&name) || self.fields.contains_key(&name) {
             return Ok(());
         }
-        Err(unresolved_variable_error(name, scope.line))
+        Err(unresolved_variable(name, scope.line))
     }
 
     fn validate_field_access(
@@ -367,7 +366,7 @@ impl Validator {
     ) -> ValidateResult<()> {
         if let Some(owner) = static_class_name(body, target) {
             if javac_call_resolver::resolve_static_field(owner, field.as_str()).is_none() {
-                return Err(unresolved_field_error(
+                return Err(unresolved_field(
                     field,
                     &display_internal_name(owner),
                     scope.line,
@@ -379,7 +378,7 @@ impl Validator {
             if self.fields.contains_key(&field) {
                 return Ok(());
             }
-            return Err(unresolved_field_error(
+            return Err(unresolved_field(
                 field,
                 &display_internal_name(self.class_name.as_str()),
                 scope.line,
@@ -387,11 +386,7 @@ impl Validator {
         }
 
         let receiver = self.expr_ty(body, scope, target);
-        Err(unresolved_field_error(
-            field,
-            &receiver.to_string(),
-            scope.line,
-        ))
+        Err(unresolved_field(field, &receiver.to_string(), scope.line))
     }
 
     fn validate_method_call(
@@ -419,7 +414,7 @@ impl Validator {
                 return self.validate_current_class_call(method, &arg_types, false, scope.line);
             }
 
-            return Err(unresolved_method_error(
+            return Err(unresolved_method(
                 method,
                 &arg_types,
                 &receiver.to_string(),
@@ -438,7 +433,7 @@ impl Validator {
         line: Option<u16>,
     ) -> ValidateResult<()> {
         let Some(sig) = self.methods.get(&method) else {
-            return Err(unresolved_method_error(
+            return Err(unresolved_method(
                 method,
                 arg_types,
                 &display_internal_name(self.class_name.as_str()),
@@ -538,23 +533,6 @@ impl Validator {
     }
 }
 
-impl Default for MethodScope {
-    fn default() -> Self {
-        Self {
-            locals: HashMap::new(),
-            line: None,
-        }
-    }
-}
-
-impl MethodScope {
-    fn with_line(&self, line: Option<u16>) -> Self {
-        let mut scope = self.clone();
-        scope.line = line;
-        scope
-    }
-}
-
 fn case_stmts(case: &SwitchCase) -> &[StmtId] {
     match case {
         SwitchCase::Case { body, .. } | SwitchCase::Default { body, .. } => body,
@@ -586,52 +564,4 @@ fn pattern_binding(body: &Body, expr_id: ExprId) -> Option<(Ustr, Ty)> {
 
 fn is_string(ty: &Ty) -> bool {
     matches!(ty.erasure(), Ty::Class(name) if name.as_str() == "java/lang/String")
-}
-
-fn display_args(args: &[Ty]) -> String {
-    args.iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-fn display_internal_name(name: &str) -> String {
-    name.replace('/', ".")
-}
-
-fn unresolved_method_error(
-    method: Ustr,
-    arg_types: &[Ty],
-    receiver: &str,
-    line: Option<u16>,
-) -> BytecodeError {
-    BytecodeError::at_line(
-        format!(
-            "cannot find symbol: method {}({}) in {}",
-            method,
-            display_args(arg_types),
-            receiver
-        ),
-        line,
-    )
-    .with_needle(method.as_str())
-    .with_label("unresolved method call")
-    .with_help("check the method name and argument types")
-}
-
-fn unresolved_variable_error(name: Ustr, line: Option<u16>) -> BytecodeError {
-    BytecodeError::at_line(format!("cannot find symbol: variable {}", name), line)
-        .with_needle(name.as_str())
-        .with_label("unresolved variable")
-        .with_help("declare the variable before using it")
-}
-
-fn unresolved_field_error(field: Ustr, receiver: &str, line: Option<u16>) -> BytecodeError {
-    BytecodeError::at_line(
-        format!("cannot find symbol: variable {} in {}", field, receiver),
-        line,
-    )
-    .with_needle(field.as_str())
-    .with_label("unresolved field")
-    .with_help("check the field name or add a matching field")
 }

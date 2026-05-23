@@ -82,6 +82,7 @@ dependencies = [
  "javac-hir",
  "javac-ty",
  "rust-asm",
+ "thiserror",
  "ustr",
 ]
 

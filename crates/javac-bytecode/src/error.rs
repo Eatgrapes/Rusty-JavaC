@@ -1,6 +1,5 @@
-use std::fmt;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{message}")]
 pub struct BytecodeError {
     pub message: String,
     pub line: Option<u16>,
@@ -43,12 +42,6 @@ impl BytecodeError {
     pub fn with_help(mut self, help: impl Into<String>) -> Self {
         self.help = Some(help.into());
         self
-    }
-}
-
-impl fmt::Display for BytecodeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.message)
     }
 }
 
