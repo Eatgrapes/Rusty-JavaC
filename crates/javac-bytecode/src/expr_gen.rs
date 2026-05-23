@@ -1,3 +1,4 @@
+mod arrays;
 mod assign;
 mod calls;
 mod convert;
@@ -26,7 +27,7 @@ pub fn gen_expr(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, expr_i
         Expr::NullLiteral => mw.visit_insn(opcodes::ACONST_NULL),
         Expr::StringLiteral(value) => mw.visit_ldc_insn_string(value),
         Expr::CharLiteral(value) => literals::emit_int(mw, *value as i64),
-        Expr::This => mw.visit_var_insn(opcodes::ALOAD, 0),
+        Expr::This | Expr::Super => mw.visit_var_insn(opcodes::ALOAD, 0),
         Expr::Ident(name) => values::emit_name(mw, ctx, *name),
         Expr::FieldAccess { target, field } => {
             if !calls::emit_field_access(mw, ctx, body, *target, *field) {
@@ -55,6 +56,11 @@ pub fn gen_expr(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, expr_i
         Expr::Switch {
             selector, cases, ..
         } => switch::emit_switch_expr(mw, ctx, body, *selector, cases),
+        Expr::Ternary {
+            condition,
+            then_expr,
+            else_expr,
+        } => emit_ternary(mw, ctx, body, expr_id, *condition, *then_expr, *else_expr),
         Expr::Unary { op, operand } => ops::emit_unary(mw, ctx, body, op, *operand),
         Expr::NewObject { class, args } => {
             let owner = class.internal_name();
@@ -72,6 +78,21 @@ pub fn gen_expr(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, expr_i
         Expr::Cast { ty, expr } => {
             gen_expr(mw, ctx, body, *expr);
             coerce(mw, &expr_ty(ctx, body, *expr), ty);
+        }
+        Expr::NewArray {
+            element_type,
+            dimensions,
+            initializer,
+        } => arrays::emit_new_array(
+            mw,
+            ctx,
+            body,
+            element_type,
+            dimensions,
+            initializer.as_ref(),
+        ),
+        Expr::ArrayAccess { array, index } => {
+            arrays::emit_array_access(mw, ctx, body, *array, *index)
         }
         Expr::Assign { target, op, value } => {
             assign::emit_assign(mw, ctx, body, *target, op, *value)
@@ -98,4 +119,28 @@ pub(crate) fn discard_expr(
 
 pub(crate) fn is_string(ty: &Ty) -> bool {
     matches!(ty.erasure(), Ty::Class(name) if name.as_str() == "java/lang/String")
+}
+
+fn emit_ternary(
+    mw: &mut MethodWriter,
+    ctx: &mut CodegenCtx,
+    body: &Body,
+    expr_id: ExprId,
+    condition: ExprId,
+    then_expr: ExprId,
+    else_expr: ExprId,
+) {
+    let else_label = javac_classfile::Label::new();
+    let end_label = javac_classfile::Label::new();
+    let result_ty = expr_ty(ctx, body, expr_id);
+
+    gen_expr(mw, ctx, body, condition);
+    mw.visit_jump_insn(opcodes::IFEQ, else_label);
+    gen_expr(mw, ctx, body, then_expr);
+    coerce(mw, &expr_ty(ctx, body, then_expr), &result_ty);
+    mw.visit_jump_insn(opcodes::GOTO, end_label);
+    mw.visit_label(else_label);
+    gen_expr(mw, ctx, body, else_expr);
+    coerce(mw, &expr_ty(ctx, body, else_expr), &result_ty);
+    mw.visit_label(end_label);
 }

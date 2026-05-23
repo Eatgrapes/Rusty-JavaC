@@ -99,7 +99,15 @@ impl BodyBuilder {
             Expr::BoolLiteral(_) => Ty::Boolean,
             Expr::CharLiteral(_) => Ty::Char,
             Expr::StringLiteral(_) => Ty::Class(Ustr::from("java/lang/String")),
+            Expr::NullLiteral => Ty::Class(Ustr::from("java/lang/Object")),
+            Expr::This | Expr::Super => Ty::Class(Ustr::from("java/lang/Object")),
             Expr::Ident(name) => self.local_ty(*name).unwrap_or(Ty::Int),
+            Expr::NewObject { class, .. } => class.clone(),
+            Expr::NewArray { element_type, .. } => Ty::Array(Box::new(element_type.clone())),
+            Expr::ArrayAccess { array, .. } => match self.expr_ty(*array) {
+                Ty::Array(element) => *element,
+                _ => Ty::Int,
+            },
             Expr::Binary { op, left, right } => {
                 let left_ty = self.expr_ty(*left);
                 let right_ty = self.expr_ty(*right);
@@ -119,7 +127,10 @@ impl BodyBuilder {
                 }
             }
             Expr::Instanceof { .. } => Ty::Boolean,
+            Expr::Ternary { then_expr, .. } => self.expr_ty(*then_expr),
             Expr::Switch { ty, .. } => ty.clone(),
+            Expr::Cast { ty, .. } => ty.clone(),
+            Expr::Assign { target, .. } => self.expr_ty(*target),
             Expr::Parens(inner) => self.expr_ty(*inner),
             _ => Ty::Int,
         }
@@ -150,7 +161,34 @@ struct ExprLowerer<'a, 'b> {
 
 impl ExprLowerer<'_, '_> {
     fn parse_expr(&mut self) -> LowerResult<ExprId> {
-        self.parse_binary(1)
+        self.parse_assignment()
+    }
+
+    fn parse_assignment(&mut self) -> LowerResult<ExprId> {
+        let target = self.parse_ternary()?;
+        let Some(op) = self.peek_assign_op() else {
+            return Ok(target);
+        };
+
+        self.pos += 1;
+        let value = self.parse_assignment()?;
+        Ok(self.body.alloc_expr(Expr::Assign { target, op, value }))
+    }
+
+    fn parse_ternary(&mut self) -> LowerResult<ExprId> {
+        let condition = self.parse_binary(1)?;
+        if !self.eat(JavaSyntaxKind::Question) {
+            return Ok(condition);
+        }
+
+        let then_expr = self.parse_expr()?;
+        self.expect(JavaSyntaxKind::Colon)?;
+        let else_expr = self.parse_ternary()?;
+        Ok(self.body.alloc_expr(Expr::Ternary {
+            condition,
+            then_expr,
+            else_expr,
+        }))
     }
 
     fn parse_binary(&mut self, min_prec: u8) -> LowerResult<ExprId> {
@@ -163,7 +201,7 @@ impl ExprLowerer<'_, '_> {
                     break;
                 }
                 self.pos += 1;
-                let ty = self.parse_type_name()?;
+                let ty = self.parse_type()?;
                 let binding = if self.peek_kind() == Some(JavaSyntaxKind::Ident) {
                     Some(Ustr::from(&self.expect_ident()?))
                 } else {
@@ -193,6 +231,16 @@ impl ExprLowerer<'_, '_> {
     }
 
     fn parse_unary(&mut self) -> LowerResult<ExprId> {
+        if self.eat(JavaSyntaxKind::Plus) {
+            return self.parse_unary();
+        }
+        if self.looks_like_cast() {
+            self.expect(JavaSyntaxKind::LParen)?;
+            let ty = self.parse_type()?;
+            self.expect(JavaSyntaxKind::RParen)?;
+            let expr = self.parse_unary()?;
+            return Ok(self.body.alloc_expr(Expr::Cast { ty, expr }));
+        }
         if self.eat(JavaSyntaxKind::Minus) {
             let operand = self.parse_unary()?;
             return Ok(self.body.alloc_expr(Expr::Unary {
@@ -233,14 +281,52 @@ impl ExprLowerer<'_, '_> {
     }
 
     fn parse_postfix(&mut self) -> LowerResult<ExprId> {
-        let expr = self.parse_primary()?;
-        if self.eat(JavaSyntaxKind::Inc) {
-            return Ok(self.body.alloc_expr(Expr::PostInc(expr)));
+        let mut expr = self.parse_primary()?;
+
+        loop {
+            if self.eat(JavaSyntaxKind::LBrack) {
+                let index = self.parse_expr()?;
+                self.expect(JavaSyntaxKind::RBrack)?;
+                expr = self
+                    .body
+                    .alloc_expr(Expr::ArrayAccess { array: expr, index });
+                continue;
+            }
+
+            if self.eat(JavaSyntaxKind::Dot) {
+                let name = self.expect_ident()?;
+                let name = Ustr::from(&name);
+                expr = if self.eat(JavaSyntaxKind::LParen) {
+                    let args = self.parse_args_after_open_paren()?;
+                    self.body.alloc_expr(Expr::MethodCall {
+                        target: Some(expr),
+                        method: name,
+                        args,
+                    })
+                } else {
+                    self.body.alloc_expr(Expr::FieldAccess {
+                        target: expr,
+                        field: name,
+                    })
+                };
+                continue;
+            }
+
+            if self.eat(JavaSyntaxKind::LParen) {
+                let args = self.parse_args_after_open_paren()?;
+                expr = self.finish_direct_call(expr, args)?;
+                continue;
+            }
+
+            if self.eat(JavaSyntaxKind::Inc) {
+                return Ok(self.body.alloc_expr(Expr::PostInc(expr)));
+            }
+            if self.eat(JavaSyntaxKind::Dec) {
+                return Ok(self.body.alloc_expr(Expr::PostDec(expr)));
+            }
+
+            return Ok(expr);
         }
-        if self.eat(JavaSyntaxKind::Dec) {
-            return Ok(self.body.alloc_expr(Expr::PostDec(expr)));
-        }
-        Ok(expr)
     }
 
     fn parse_primary(&mut self) -> LowerResult<ExprId> {
@@ -301,7 +387,19 @@ impl ExprLowerer<'_, '_> {
                 self.pos += 1;
                 Ok(self.body.alloc_expr(Expr::This))
             }
-            JavaSyntaxKind::Ident => self.parse_name_or_call(),
+            JavaSyntaxKind::SuperKw => {
+                self.pos += 1;
+                Ok(self.body.alloc_expr(Expr::Super))
+            }
+            JavaSyntaxKind::NewKw => self.parse_new_expr(),
+            JavaSyntaxKind::Ident => {
+                let name = self.expect_ident()?;
+                let name = Ustr::from(&name);
+                if self.body.pattern_name_is_out_of_scope(name) {
+                    return Err(LowerError::PatternVariableOutOfScope(name.to_string()));
+                }
+                Ok(self.body.alloc_expr(Expr::Ident(name)))
+            }
             JavaSyntaxKind::LParen => {
                 self.pos += 1;
                 let inner = self.parse_expr()?;
@@ -312,31 +410,81 @@ impl ExprLowerer<'_, '_> {
         }
     }
 
-    fn parse_name_or_call(&mut self) -> LowerResult<ExprId> {
-        let mut segments = vec![self.expect_ident()?];
-        while self.eat(JavaSyntaxKind::Dot) {
-            segments.push(self.expect_ident()?);
-        }
+    fn parse_new_expr(&mut self) -> LowerResult<ExprId> {
+        self.expect(JavaSyntaxKind::NewKw)?;
+        let element_type = self.parse_type_base()?;
 
         if self.eat(JavaSyntaxKind::LParen) {
-            let args = self.parse_args()?;
-            let method = segments.pop().ok_or(LowerError::UnsupportedExpression)?;
-            let target = if segments.is_empty() {
-                None
-            } else {
-                Some(self.build_path_expr(&segments)?)
-            };
-            return Ok(self.body.alloc_expr(Expr::MethodCall {
-                target,
-                method: Ustr::from(&method),
+            let args = self.parse_args_after_open_paren()?;
+            return Ok(self.body.alloc_expr(Expr::NewObject {
+                class: element_type,
                 args,
             }));
         }
 
-        self.build_path_expr(&segments)
+        let mut dimensions = Vec::new();
+        while self.eat(JavaSyntaxKind::LBrack) {
+            let size = if self.eat(JavaSyntaxKind::RBrack) {
+                None
+            } else {
+                let size = self.parse_expr()?;
+                self.expect(JavaSyntaxKind::RBrack)?;
+                Some(size)
+            };
+            dimensions.push(size);
+        }
+
+        let initializer = if self.eat(JavaSyntaxKind::LBrace) {
+            Some(self.parse_array_initializer()?)
+        } else {
+            None
+        };
+
+        Ok(self.body.alloc_expr(Expr::NewArray {
+            element_type,
+            dimensions,
+            initializer,
+        }))
     }
 
-    fn parse_args(&mut self) -> LowerResult<Vec<ExprId>> {
+    fn parse_array_initializer(&mut self) -> LowerResult<ArrayInit> {
+        let mut elements = Vec::new();
+        if self.eat(JavaSyntaxKind::RBrace) {
+            return Ok(ArrayInit { elements });
+        }
+
+        loop {
+            elements.push(self.parse_expr()?);
+            if self.eat(JavaSyntaxKind::Comma) {
+                if self.eat(JavaSyntaxKind::RBrace) {
+                    break;
+                }
+                continue;
+            }
+            self.expect(JavaSyntaxKind::RBrace)?;
+            break;
+        }
+
+        Ok(ArrayInit { elements })
+    }
+
+    fn finish_direct_call(&mut self, expr: ExprId, args: Vec<ExprId>) -> LowerResult<ExprId> {
+        match self.body.body.exprs[expr].clone() {
+            Expr::Ident(method) => Ok(self.body.alloc_expr(Expr::MethodCall {
+                target: None,
+                method,
+                args,
+            })),
+            Expr::FieldAccess { target, field } => Ok(self.body.alloc_expr(Expr::MethodCall {
+                target: Some(target),
+                method: field,
+                args,
+            })),
+            _ => Err(LowerError::UnsupportedExpression),
+        }
+    }
+
+    fn parse_args_after_open_paren(&mut self) -> LowerResult<Vec<ExprId>> {
         let mut args = Vec::new();
         if self.eat(JavaSyntaxKind::RParen) {
             return Ok(args);
@@ -354,20 +502,75 @@ impl ExprLowerer<'_, '_> {
         Ok(args)
     }
 
-    fn build_path_expr(&mut self, segments: &[String]) -> LowerResult<ExprId> {
-        let first = Ustr::from(&segments[0]);
-        if self.body.pattern_name_is_out_of_scope(first) {
-            return Err(LowerError::PatternVariableOutOfScope(segments[0].clone()));
+    fn parse_type(&mut self) -> LowerResult<Ty> {
+        let mut ty = self.parse_type_base()?;
+        while self.eat(JavaSyntaxKind::LBrack) {
+            self.expect(JavaSyntaxKind::RBrack)?;
+            ty = Ty::Array(Box::new(ty));
+        }
+        Ok(ty)
+    }
+
+    fn parse_type_base(&mut self) -> LowerResult<Ty> {
+        let Some(token) = self.peek().cloned() else {
+            return Err(LowerError::UnsupportedExpression);
+        };
+
+        let ty = match token.kind {
+            JavaSyntaxKind::BooleanKw => Ty::Boolean,
+            JavaSyntaxKind::ByteKw => Ty::Byte,
+            JavaSyntaxKind::CharKw => Ty::Char,
+            JavaSyntaxKind::ShortKw => Ty::Short,
+            JavaSyntaxKind::IntKw => Ty::Int,
+            JavaSyntaxKind::LongKw => Ty::Long,
+            JavaSyntaxKind::FloatKw => Ty::Float,
+            JavaSyntaxKind::DoubleKw => Ty::Double,
+            JavaSyntaxKind::Ident => return self.parse_type_name(),
+            _ => return Err(LowerError::UnsupportedExpression),
+        };
+        self.pos += 1;
+        Ok(ty)
+    }
+
+    fn looks_like_cast(&self) -> bool {
+        if self.peek_kind() != Some(JavaSyntaxKind::LParen) {
+            return false;
         }
 
-        let mut expr = self.body.alloc_expr(Expr::Ident(first));
-        for segment in &segments[1..] {
-            expr = self.body.alloc_expr(Expr::FieldAccess {
-                target: expr,
-                field: Ustr::from(segment),
-            });
+        let Some(close) = self.matching_rparen(self.pos) else {
+            return false;
+        };
+        if close <= self.pos + 1 {
+            return false;
         }
-        Ok(expr)
+
+        let first = &self.tokens[self.pos + 1];
+        if is_primitive_type_token(first.kind) {
+            return true;
+        }
+
+        first.kind == JavaSyntaxKind::Ident
+            && first.text.chars().next().is_some_and(char::is_uppercase)
+            && self.tokens[self.pos + 2..close]
+                .iter()
+                .all(|token| matches!(token.kind, JavaSyntaxKind::Ident | JavaSyntaxKind::Dot))
+    }
+
+    fn matching_rparen(&self, open: usize) -> Option<usize> {
+        let mut depth = 0usize;
+        for (index, token) in self.tokens.iter().enumerate().skip(open) {
+            match token.kind {
+                JavaSyntaxKind::LParen => depth += 1,
+                JavaSyntaxKind::RParen => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return Some(index);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
     }
 
     fn peek(&self) -> Option<&ExprToken> {
@@ -400,6 +603,26 @@ impl ExprLowerer<'_, '_> {
             JavaSyntaxKind::Star => (BinaryOp::Mul, 10),
             JavaSyntaxKind::Slash => (BinaryOp::Div, 10),
             JavaSyntaxKind::Percent => (BinaryOp::Rem, 10),
+            _ => return None,
+        };
+        Some(op)
+    }
+
+    fn peek_assign_op(&self) -> Option<AssignOp> {
+        let token = self.peek()?;
+        let op = match token.kind {
+            JavaSyntaxKind::Eq => AssignOp::Plain,
+            JavaSyntaxKind::PlusEq => AssignOp::Add,
+            JavaSyntaxKind::MinusEq => AssignOp::Sub,
+            JavaSyntaxKind::StarEq => AssignOp::Mul,
+            JavaSyntaxKind::SlashEq => AssignOp::Div,
+            JavaSyntaxKind::PercentEq => AssignOp::Rem,
+            JavaSyntaxKind::LtLtEq => AssignOp::Shl,
+            JavaSyntaxKind::GtGtEq => AssignOp::Shr,
+            JavaSyntaxKind::GtGtGtEq => AssignOp::Ushr,
+            JavaSyntaxKind::AmpEq => AssignOp::And,
+            JavaSyntaxKind::PipeEq => AssignOp::Or,
+            JavaSyntaxKind::CaretEq => AssignOp::Xor,
             _ => return None,
         };
         Some(op)
@@ -440,6 +663,20 @@ impl ExprLowerer<'_, '_> {
         self.pos += 1;
         Ok(token.text)
     }
+}
+
+fn is_primitive_type_token(kind: JavaSyntaxKind) -> bool {
+    matches!(
+        kind,
+        JavaSyntaxKind::BooleanKw
+            | JavaSyntaxKind::ByteKw
+            | JavaSyntaxKind::CharKw
+            | JavaSyntaxKind::ShortKw
+            | JavaSyntaxKind::IntKw
+            | JavaSyntaxKind::LongKw
+            | JavaSyntaxKind::FloatKw
+            | JavaSyntaxKind::DoubleKw
+    )
 }
 
 fn parse_int_literal(text: &str) -> i64 {
