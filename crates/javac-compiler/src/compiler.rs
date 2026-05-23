@@ -1,6 +1,8 @@
+use crate::classpath::build_class_catalog;
 use crate::config::CompilerConfig;
 use javac_ast::JavaSyntaxNode;
 use javac_bytecode::BytecodeError;
+use javac_call_resolver::ClassCatalog;
 use javac_diagnostics::{Diagnostic, SourceFile, render_diagnostics};
 use javac_hir::hir::CompilationUnit;
 use javac_hir::lowering::LowerError;
@@ -24,9 +26,10 @@ impl Compiler {
     }
 
     pub fn compile(self) -> CompileResult<()> {
+        let catalog = build_class_catalog(&self.config.classpath, &self.config.source_files)?;
         let mut errors = Vec::new();
         for source_file in &self.config.source_files {
-            if let Err(error) = self.compile_file(source_file) {
+            if let Err(error) = self.compile_file(source_file, &catalog) {
                 errors.extend(error);
             }
         }
@@ -37,9 +40,9 @@ impl Compiler {
         }
     }
 
-    fn compile_file(&self, source_file: &str) -> CompileResult<()> {
+    fn compile_file(&self, source_file: &str, catalog: &ClassCatalog) -> CompileResult<()> {
         let source = read_source_file(source_file)?;
-        let artifact = compile_source(source_file, &source)?;
+        let artifact = compile_source(source_file, &source, catalog)?;
         write_class_file(&self.config.output_dir, &artifact)?;
         Ok(())
     }
@@ -49,8 +52,12 @@ fn read_source_file(path: &str) -> CompileResult<String> {
     std::fs::read_to_string(path).map_err(|e| vec![format!("failed to read {}: {}", path, e)])
 }
 
-fn compile_source(filename: &str, source: &str) -> CompileResult<ClassArtifact> {
-    let unit = parse_and_lower(filename, source)?;
+fn compile_source(
+    filename: &str,
+    source: &str,
+    catalog: &ClassCatalog,
+) -> CompileResult<ClassArtifact> {
+    let unit = parse_and_lower(filename, source, catalog)?;
     let internal_name = top_level_class_name(filename, &unit)?;
     let bytes = javac_bytecode::class_gen::gen_class(&unit)
         .map_err(|e| render_bytecode_error(filename, source, &e))?;
@@ -61,7 +68,11 @@ fn compile_source(filename: &str, source: &str) -> CompileResult<ClassArtifact> 
     })
 }
 
-fn parse_and_lower(filename: &str, source: &str) -> CompileResult<CompilationUnit> {
+fn parse_and_lower(
+    filename: &str,
+    source: &str,
+    catalog: &ClassCatalog,
+) -> CompileResult<CompilationUnit> {
     let parse = javac_parser::Parser::parse(source);
     if !parse.errors.is_empty() {
         let diagnostics = parse
@@ -76,7 +87,8 @@ fn parse_and_lower(filename: &str, source: &str) -> CompileResult<CompilationUni
     }
 
     let root = JavaSyntaxNode::new_root(parse.green_node);
-    javac_hir::lowering::lower(&root).map_err(|e| render_lower_error(filename, source, &e))
+    javac_hir::lowering::lower_with_catalog(&root, catalog)
+        .map_err(|e| render_lower_error(filename, source, &e))
 }
 
 fn render_lower_error(filename: &str, source: &str, error: &LowerError) -> Vec<String> {

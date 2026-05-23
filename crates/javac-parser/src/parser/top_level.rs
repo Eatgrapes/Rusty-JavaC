@@ -46,7 +46,10 @@ pub(crate) fn import_decl(p: &mut Parser) {
     p.expect(ImportKw);
     p.eat(StaticKw);
     qualified_name(p);
-    p.eat(Star);
+    if p.at(Dot) && p.look(1) == Star {
+        p.bump();
+        p.bump();
+    }
     p.expect(Semi);
     m.complete(p, ImportDecl);
 }
@@ -86,7 +89,8 @@ pub(crate) fn qualified_name(p: &mut Parser) {
     use JavaSyntaxKind::*;
     let m = p.start();
     p.expect(Ident);
-    while p.eat(Dot) {
+    while p.at(Dot) && p.look(1) == Ident {
+        p.bump();
         p.expect(Ident);
     }
     m.complete(p, QualifiedName);

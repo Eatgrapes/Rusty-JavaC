@@ -12,5 +12,8 @@ javac-hir = { path = "../javac-hir" }
 javac-ty = { path = "../javac-ty" }
 javac-bytecode = { path = "../javac-bytecode" }
 javac-classfile = { path = "../javac-classfile" }
+javac-call-resolver = { path = "../javac-call-resolver" }
 javac-diagnostics = { path = "../javac-diagnostics" }
+rust-asm = { workspace = true }
 text-size = { workspace = true }
+zip = { version = "2", default-features = false, features = ["deflate"] }
