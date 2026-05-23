@@ -4,7 +4,7 @@ use crate::lowering::syntax::{
     ExprToken, case_pattern_tokens, expr_tokens, first_ident, initializer_tokens, source_line,
     tokens_after_keyword, tokens_in_first_parens,
 };
-use crate::lowering::types::{is_var_type, lower_type};
+use crate::lowering::types::is_var_type;
 use crate::lowering::{LowerError, LowerResult};
 use javac_ast::{JavaSyntaxKind, JavaSyntaxNode};
 use javac_ty::Ty;
@@ -62,7 +62,7 @@ fn lower_local_var_decl(decl: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerR
         .children()
         .find(|child| child.kind() == JavaSyntaxKind::Type)
         .ok_or(LowerError::MissingType)?;
-    let explicit_ty = lower_type(&declared_ty)?;
+    let explicit_ty = body.lower_type(&declared_ty)?;
     let is_var = is_var_type(&declared_ty);
     let mut stmts = Vec::new();
 
@@ -261,7 +261,7 @@ fn lower_for_init_var_decl(
         .children()
         .find(|child| child.kind() == JavaSyntaxKind::Type)
         .ok_or(LowerError::MissingType)?;
-    let ty = lower_type(&declared_ty)?;
+    let ty = body.lower_type(&declared_ty)?;
     let mut stmts = Vec::new();
 
     for declarator in init
@@ -294,7 +294,7 @@ fn lower_for_each_stmt(stmt: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerRe
         .children()
         .find(|child| child.kind() == JavaSyntaxKind::Type)
         .ok_or(LowerError::MissingType)?;
-    let var_type = lower_type(&declared_ty)?;
+    let var_type = body.lower_type(&declared_ty)?;
     let var_name = for_each_var_name(stmt)?;
     let iterable = body
         .lower_expr_tokens(&for_each_iterable_tokens(stmt))?
@@ -420,7 +420,7 @@ fn lower_try_resource(
         .children()
         .find(|child| child.kind() == JavaSyntaxKind::Type)
         .ok_or(LowerError::MissingType)?;
-    let explicit_ty = lower_type(&declared_ty)?;
+    let explicit_ty = body.lower_type(&declared_ty)?;
     let initializer = if let Some(tokens) = initializer_tokens(resource) {
         body.lower_expr_tokens(&tokens)?
     } else {
@@ -442,7 +442,7 @@ fn lower_catch_clause(clause: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerR
         .children()
         .find(|child| child.kind() == JavaSyntaxKind::Type)
         .ok_or(LowerError::MissingType)?;
-    let exception_type = lower_type(&ty_node)?;
+    let exception_type = body.lower_type(&ty_node)?;
     let var_name = catch_var_name(clause)?;
     let catch_block = clause
         .children()

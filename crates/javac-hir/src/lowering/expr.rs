@@ -1,7 +1,7 @@
 use crate::hir::*;
 use crate::lowering::literal;
 use crate::lowering::syntax::ExprToken;
-use crate::lowering::types::{class_type_from_name, is_string_ty};
+use crate::lowering::types::{TypeResolver, class_type_from_name, is_string_ty, lower_type};
 use crate::lowering::{LowerError, LowerResult};
 use javac_ast::JavaSyntaxKind;
 use javac_ty::Ty;
@@ -11,11 +11,19 @@ use ustr::Ustr;
 #[derive(Default)]
 pub(super) struct BodyBuilder {
     pub body: Body,
+    type_resolver: TypeResolver,
     local_scopes: Vec<HashMap<Ustr, Ty>>,
     pattern_names: HashSet<Ustr>,
 }
 
 impl BodyBuilder {
+    pub(super) fn new(type_resolver: TypeResolver) -> Self {
+        Self {
+            type_resolver,
+            ..Self::default()
+        }
+    }
+
     pub(super) fn alloc_stmt(&mut self, stmt: Stmt) -> StmtId {
         self.body.stmts.alloc(stmt)
     }
@@ -139,6 +147,14 @@ impl BodyBuilder {
 
     pub(super) fn alloc_expr(&mut self, expr: Expr) -> ExprId {
         self.body.exprs.alloc(expr)
+    }
+
+    pub(super) fn lower_type(&self, node: &javac_ast::JavaSyntaxNode) -> LowerResult<Ty> {
+        lower_type(node, &self.type_resolver)
+    }
+
+    fn resolve_type_name(&self, name: &str) -> LowerResult<Ty> {
+        class_type_from_name(name, 1, &self.type_resolver)
     }
 }
 
@@ -638,7 +654,7 @@ impl ExprLowerer<'_, '_> {
         while self.eat(JavaSyntaxKind::Dot) {
             segments.push(self.expect_ident()?);
         }
-        Ok(class_type_from_name(&segments.join(".")))
+        self.body.resolve_type_name(&segments.join("."))
     }
 
     fn eat(&mut self, kind: JavaSyntaxKind) -> bool {

@@ -14,10 +14,14 @@ pub enum LowerError {
     MissingClassName,
     #[error("import declaration is missing a name")]
     MissingImportName,
+    #[error("cannot find symbol: import `{name}`")]
+    UnknownImport { name: String, line: u16 },
     #[error("method declaration is missing a name")]
     MissingMethodName,
     #[error("type syntax is missing")]
     MissingType,
+    #[error("cannot find symbol: class `{name}`")]
+    UnknownType { name: String, line: u16 },
     #[error("unsupported expression")]
     UnsupportedExpression,
     #[error("pattern variable `{0}` is not in scope")]

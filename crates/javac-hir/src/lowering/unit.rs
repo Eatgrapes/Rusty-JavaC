@@ -2,7 +2,8 @@ use crate::hir::*;
 use crate::lowering::member::lower_class_members;
 use crate::lowering::modifiers::access_flags;
 use crate::lowering::signature::{class_signature, lower_type_params};
-use crate::lowering::syntax::qualified_name_text;
+use crate::lowering::syntax::{qualified_name_text, source_line};
+use crate::lowering::types::TypeResolver;
 use crate::lowering::{LowerError, LowerResult};
 use javac_ast::ast::{
     AstNode, ClassDecl, CompilationUnit as AstCompilationUnit, ImportDecl as AstImportDecl,
@@ -14,7 +15,7 @@ pub(super) fn lower_compilation_unit(node: &JavaSyntaxNode) -> LowerResult<Compi
     let unit = AstCompilationUnit::cast(node.clone()).ok_or(LowerError::ExpectedCompilationUnit)?;
     let package = lower_package(&unit)?;
     let imports = lower_imports(&unit)?;
-    let type_decls = lower_top_level_types(node, package.as_ref())?;
+    let type_decls = lower_top_level_types(node, package.as_ref(), &imports)?;
 
     Ok(CompilationUnit {
         package,
@@ -44,12 +45,14 @@ fn lower_import(import: AstImportDecl) -> LowerResult<Import> {
         path: Ustr::from(&path),
         is_static: import.is_static(),
         is_wildcard: import.is_wildcard(),
+        source_line: Some(source_line(import.syntax())),
     })
 }
 
 fn lower_top_level_types(
     node: &JavaSyntaxNode,
     package: Option<&Package>,
+    imports: &[Import],
 ) -> LowerResult<Vec<TypeDecl>> {
     let mut pending_flags = 0;
     let mut type_decls = Vec::new();
@@ -58,7 +61,7 @@ fn lower_top_level_types(
             JavaSyntaxKind::ModifierList => pending_flags = access_flags(&child),
             JavaSyntaxKind::ClassDecl => {
                 let class = ClassDecl::cast(child).ok_or(LowerError::UnsupportedTypeDeclaration)?;
-                type_decls.push(lower_class_decl(class, pending_flags, package)?);
+                type_decls.push(lower_class_decl(class, pending_flags, package, imports)?);
                 pending_flags = 0;
             }
             JavaSyntaxKind::InterfaceDecl
@@ -80,14 +83,16 @@ fn lower_class_decl(
     class: ClassDecl,
     access_flags: u16,
     package: Option<&Package>,
+    imports: &[Import],
 ) -> LowerResult<TypeDecl> {
     let name = class.name().ok_or(LowerError::MissingClassName)?;
     let internal_name = internal_class_name(package, name.text());
-    let type_params = lower_type_params(class.syntax())?;
-    let generic_signature = class_signature(class.syntax(), &type_params)?;
+    let resolver = TypeResolver::for_class(package, imports, &internal_name)?;
+    let type_params = lower_type_params(class.syntax(), &resolver)?;
+    let generic_signature = class_signature(class.syntax(), &type_params, &resolver)?;
     let members = class
         .body()
-        .map(|body| lower_class_members(body, &type_params))
+        .map(|body| lower_class_members(body, &type_params, &resolver))
         .transpose()?
         .unwrap_or_default();
 

@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 javac-ast = { path = "../javac-ast" }
+javac-call-resolver = { path = "../javac-call-resolver" }
 javac-ty = { path = "../javac-ty" }
 la-arena = "0.3.1"
 thiserror = { workspace = true }

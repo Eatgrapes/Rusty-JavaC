@@ -4,7 +4,7 @@ use crate::lowering::modifiers::{access_flags, has_code};
 use crate::lowering::signature::{lower_type_params, method_signature};
 use crate::lowering::stmt::lower_block;
 use crate::lowering::syntax::{first_ident, initializer_tokens, last_ident, source_line};
-use crate::lowering::types::lower_type_with_vars;
+use crate::lowering::types::{TypeResolver, lower_type_with_vars};
 use crate::lowering::{LowerError, LowerResult};
 use javac_ast::ast::{AstNode, ClassBody, FieldDecl as AstFieldDecl, MethodDecl as AstMethodDecl};
 use javac_ast::{JavaSyntaxKind, JavaSyntaxNode};
@@ -21,6 +21,7 @@ pub(super) struct ClassMembers {
 pub(super) fn lower_class_members(
     body: ClassBody,
     class_type_params: &[javac_ty::TypeParam],
+    resolver: &TypeResolver,
 ) -> LowerResult<ClassMembers> {
     let mut pending_flags = 0;
     let mut fields = Vec::new();
@@ -37,6 +38,7 @@ pub(super) fn lower_class_members(
                     pending_flags,
                     fields.len() as u32,
                     &type_vars,
+                    resolver,
                 )?);
                 pending_flags = 0;
             }
@@ -48,6 +50,7 @@ pub(super) fn lower_class_members(
                     pending_flags,
                     methods.len() as u32,
                     class_type_params,
+                    resolver,
                 )?);
                 pending_flags = 0;
             }
@@ -57,6 +60,7 @@ pub(super) fn lower_class_members(
                     pending_flags,
                     methods.len() as u32,
                     class_type_params,
+                    resolver,
                 )?);
                 pending_flags = 0;
             }
@@ -76,9 +80,10 @@ fn lower_field_decl(
     access_flags: u16,
     first_field_index: u32,
     type_vars: &HashSet<Ustr>,
+    resolver: &TypeResolver,
 ) -> LowerResult<Vec<FieldDecl>> {
     let declared_ty = field.ty().ok_or(LowerError::MissingType)?;
-    let ty = lower_type_with_vars(declared_ty.syntax(), type_vars)?;
+    let ty = lower_type_with_vars(declared_ty.syntax(), type_vars, resolver)?;
     let mut fields = Vec::new();
 
     for declarator in field
@@ -87,7 +92,7 @@ fn lower_field_decl(
         .filter(|node| node.kind() == JavaSyntaxKind::VarDeclarator)
     {
         let name = first_ident(&declarator).ok_or(LowerError::MissingMethodName)?;
-        let mut body_builder = BodyBuilder::default();
+        let mut body_builder = BodyBuilder::new(resolver.clone());
         let initializer = initializer_tokens(&declarator)
             .map(|tokens| body_builder.lower_expr_tokens(&tokens))
             .transpose()?
@@ -112,16 +117,17 @@ fn lower_constructor_decl(
     access_flags: u16,
     method_index: u32,
     class_type_params: &[javac_ty::TypeParam],
+    resolver: &TypeResolver,
 ) -> LowerResult<MethodDecl> {
     let type_vars = type_var_set(class_type_params, &[]);
-    let params = lower_method_params(constructor, &type_vars)?;
-    let throws = lower_throws(constructor, &type_vars)?;
+    let params = lower_method_params(constructor, &type_vars, resolver)?;
+    let throws = lower_throws(constructor, &type_vars, resolver)?;
     let signature = MethodSig::new(
         Ustr::from("<init>"),
         params.iter().map(|param| param.ty.clone()).collect(),
         Ty::Void,
     );
-    let mut body_builder = BodyBuilder::default();
+    let mut body_builder = BodyBuilder::new(resolver.clone());
     define_params(&mut body_builder, &params);
     let root_block = constructor
         .children()
@@ -152,26 +158,31 @@ fn lower_method_decl(
     access_flags: u16,
     method_index: u32,
     class_type_params: &[javac_ty::TypeParam],
+    resolver: &TypeResolver,
 ) -> LowerResult<MethodDecl> {
     let name = method.name().ok_or(LowerError::MissingMethodName)?;
-    let method_type_params = lower_type_params(method.syntax())?;
+    let method_type_params = lower_type_params(method.syntax(), resolver)?;
     let type_vars = type_var_set(class_type_params, &method_type_params);
     let return_type = method
         .return_type()
-        .map(|ty| lower_type_with_vars(ty.syntax(), &type_vars))
+        .map(|ty| lower_type_with_vars(ty.syntax(), &type_vars, resolver))
         .transpose()?
         .unwrap_or(Ty::Void);
-    let params = lower_method_params(method.syntax(), &type_vars)?;
-    let throws = lower_throws(method.syntax(), &type_vars)?;
-    let generic_signature =
-        method_signature(method.syntax(), class_type_params, &method_type_params)?;
+    let params = lower_method_params(method.syntax(), &type_vars, resolver)?;
+    let throws = lower_throws(method.syntax(), &type_vars, resolver)?;
+    let generic_signature = method_signature(
+        method.syntax(),
+        class_type_params,
+        &method_type_params,
+        resolver,
+    )?;
     let mut signature = MethodSig::new(
         Ustr::from(name.text()),
         params.iter().map(|param| param.ty.clone()).collect(),
         return_type,
     );
     signature.type_params = method_type_params;
-    let mut body_builder = BodyBuilder::default();
+    let mut body_builder = BodyBuilder::new(resolver.clone());
     define_params(&mut body_builder, &params);
     let root_block = lower_method_body(access_flags, &method, &mut body_builder)?;
 
@@ -192,6 +203,7 @@ fn lower_method_decl(
 fn lower_method_params(
     method: &JavaSyntaxNode,
     type_vars: &HashSet<Ustr>,
+    resolver: &TypeResolver,
 ) -> LowerResult<Vec<ParamDecl>> {
     let Some(params) = method
         .children()
@@ -211,13 +223,17 @@ fn lower_method_params(
             let name = last_ident(&param).ok_or(LowerError::MissingMethodName)?;
             Ok(ParamDecl {
                 name: Ustr::from(name.text()),
-                ty: lower_type_with_vars(&ty, type_vars)?,
+                ty: lower_type_with_vars(&ty, type_vars, resolver)?,
             })
         })
         .collect()
 }
 
-fn lower_throws(method: &JavaSyntaxNode, type_vars: &HashSet<Ustr>) -> LowerResult<Vec<Ty>> {
+fn lower_throws(
+    method: &JavaSyntaxNode,
+    type_vars: &HashSet<Ustr>,
+    resolver: &TypeResolver,
+) -> LowerResult<Vec<Ty>> {
     let Some(throws_clause) = method
         .children()
         .find(|child| child.kind() == JavaSyntaxKind::ThrowsClause)
@@ -228,7 +244,7 @@ fn lower_throws(method: &JavaSyntaxNode, type_vars: &HashSet<Ustr>) -> LowerResu
     throws_clause
         .descendants()
         .filter(|node| node.kind() == JavaSyntaxKind::Type)
-        .map(|ty| lower_type_with_vars(&ty, type_vars))
+        .map(|ty| lower_type_with_vars(&ty, type_vars, resolver))
         .collect()
 }
 

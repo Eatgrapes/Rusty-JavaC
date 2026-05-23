@@ -27,6 +27,7 @@ pub struct Import {
     pub path: Ustr,
     pub is_static: bool,
     pub is_wildcard: bool,
+    pub source_line: Option<u16>,
 }
 
 #[derive(Debug, Clone)]

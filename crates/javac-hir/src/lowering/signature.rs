@@ -1,11 +1,15 @@
-use crate::lowering::types::{class_internal_name, lower_type};
+use crate::lowering::syntax::source_line;
+use crate::lowering::types::{TypeResolver, lower_type};
 use crate::lowering::{LowerError, LowerResult};
 use javac_ast::{JavaSyntaxKind, JavaSyntaxNode, JavaSyntaxToken};
 use javac_ty::{Ty, TypeParam};
 use std::collections::HashSet;
 use ustr::Ustr;
 
-pub(super) fn lower_type_params(owner: &JavaSyntaxNode) -> LowerResult<Vec<TypeParam>> {
+pub(super) fn lower_type_params(
+    owner: &JavaSyntaxNode,
+    resolver: &TypeResolver,
+) -> LowerResult<Vec<TypeParam>> {
     let Some(list) = owner
         .children()
         .find(|child| child.kind() == JavaSyntaxKind::TypeParamList)
@@ -15,13 +19,14 @@ pub(super) fn lower_type_params(owner: &JavaSyntaxNode) -> LowerResult<Vec<TypeP
 
     list.children()
         .filter(|child| child.kind() == JavaSyntaxKind::TypeParam)
-        .map(lower_type_param)
+        .map(|param| lower_type_param(param, resolver))
         .collect()
 }
 
 pub(super) fn class_signature(
     class: &JavaSyntaxNode,
     type_params: &[TypeParam],
+    resolver: &TypeResolver,
 ) -> LowerResult<Option<String>> {
     if type_params.is_empty() && !has_generic_type(class) {
         return Ok(None);
@@ -33,7 +38,7 @@ pub(super) fn class_signature(
         .children()
         .find(|child| child.kind() == JavaSyntaxKind::ExtendsClause)
         .and_then(|extends| type_children(&extends).next())
-        .map(|ty| type_signature(&ty, &vars))
+        .map(|ty| type_signature(&ty, &vars, resolver))
         .transpose()?
         .unwrap_or_else(|| "Ljava/lang/Object;".to_string());
     signature.push_str(&super_type);
@@ -45,7 +50,7 @@ pub(super) fn class_signature(
         .flat_map(|implements| type_children(&implements).collect::<Vec<_>>())
         .collect::<Vec<_>>();
     for interface in interfaces {
-        signature.push_str(&type_signature(&interface, &vars)?);
+        signature.push_str(&type_signature(&interface, &vars, resolver)?);
     }
 
     Ok(Some(signature))
@@ -55,6 +60,7 @@ pub(super) fn method_signature(
     method: &JavaSyntaxNode,
     class_type_params: &[TypeParam],
     method_type_params: &[TypeParam],
+    resolver: &TypeResolver,
 ) -> LowerResult<Option<String>> {
     let mut all_params = class_type_params.to_vec();
     all_params.extend_from_slice(method_type_params);
@@ -77,7 +83,7 @@ pub(super) fn method_signature(
                 .children()
                 .find(|child| child.kind() == JavaSyntaxKind::Type)
                 .ok_or(LowerError::MissingType)?;
-            signature.push_str(&type_signature(&ty, &vars)?);
+            signature.push_str(&type_signature(&ty, &vars, resolver)?);
         }
     }
     signature.push(')');
@@ -86,12 +92,12 @@ pub(super) fn method_signature(
         .children()
         .find(|child| child.kind() == JavaSyntaxKind::Type)
         .ok_or(LowerError::MissingType)?;
-    signature.push_str(&type_signature(&return_type, &vars)?);
+    signature.push_str(&type_signature(&return_type, &vars, resolver)?);
 
     Ok(Some(signature))
 }
 
-fn lower_type_param(node: JavaSyntaxNode) -> LowerResult<TypeParam> {
+fn lower_type_param(node: JavaSyntaxNode, resolver: &TypeResolver) -> LowerResult<TypeParam> {
     let name = node
         .children_with_tokens()
         .filter_map(|element| element.into_token())
@@ -105,7 +111,7 @@ fn lower_type_param(node: JavaSyntaxNode) -> LowerResult<TypeParam> {
         .collect::<Vec<_>>();
     let bounds = bound_types
         .into_iter()
-        .map(|ty| lower_type(&ty))
+        .map(|ty| lower_type(&ty, resolver))
         .collect::<LowerResult<Vec<_>>>()?;
 
     Ok(TypeParam {
@@ -162,7 +168,11 @@ fn type_params_signature(type_params: &[TypeParam]) -> String {
     signature
 }
 
-fn type_signature(node: &JavaSyntaxNode, type_vars: &HashSet<String>) -> LowerResult<String> {
+fn type_signature(
+    node: &JavaSyntaxNode,
+    type_vars: &HashSet<String>,
+    resolver: &TypeResolver,
+) -> LowerResult<String> {
     let tokens = node
         .descendants_with_tokens()
         .filter_map(|element| element.into_token())
@@ -172,6 +182,8 @@ fn type_signature(node: &JavaSyntaxNode, type_vars: &HashSet<String>) -> LowerRe
         tokens: &tokens,
         pos: 0,
         type_vars,
+        resolver,
+        line: source_line(node),
     };
     parser.parse_type()
 }
@@ -213,6 +225,8 @@ struct TypeSignatureParser<'a> {
     tokens: &'a [JavaSyntaxToken],
     pos: usize,
     type_vars: &'a HashSet<String>,
+    resolver: &'a TypeResolver,
+    line: u16,
 }
 
 impl TypeSignatureParser<'_> {
@@ -259,15 +273,19 @@ impl TypeSignatureParser<'_> {
             return Ok(format!("T{first};"));
         }
 
-        let mut name = class_internal_name(&first);
+        let mut source_name = first;
         let mut args = self.parse_type_args()?;
         while self.eat(JavaSyntaxKind::Dot) {
-            name.push('/');
-            name.push_str(&self.expect_ident()?);
+            source_name.push('.');
+            source_name.push_str(&self.expect_ident()?);
             args.push_str(&self.parse_type_args()?);
         }
 
-        Ok(format!("L{name}{args};"))
+        let internal_name = self
+            .resolver
+            .resolve_type_name(&source_name, self.line, &HashSet::new())?
+            .internal_name();
+        Ok(format!("L{internal_name}{args};"))
     }
 
     fn parse_type_args(&mut self) -> LowerResult<String> {

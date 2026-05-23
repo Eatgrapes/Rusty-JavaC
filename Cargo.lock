@@ -130,6 +130,7 @@ name = "javac-hir"
 version = "0.1.0"
 dependencies = [
  "javac-ast",
+ "javac-call-resolver",
  "javac-ty",
  "la-arena",
  "thiserror",

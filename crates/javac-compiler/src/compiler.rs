@@ -80,12 +80,21 @@ fn parse_and_lower(filename: &str, source: &str) -> CompileResult<CompilationUni
 }
 
 fn render_lower_error(filename: &str, source: &str, error: &LowerError) -> Vec<String> {
-    let diagnostic = Diagnostic::error(error.to_string(), source_start_range(source))
+    let diagnostic = Diagnostic::error(error.to_string(), lower_error_range(source, error))
         .with_code("L0001")
         .with_primary_label(lower_error_label(error))
         .with_help(lower_error_help(error));
 
     render_diagnostics(SourceFile::new(filename, source), &[diagnostic])
+}
+
+fn lower_error_range(source: &str, error: &LowerError) -> TextRange {
+    match error {
+        LowerError::UnknownImport { name, line } | LowerError::UnknownType { name, line } => {
+            line_range(source, *line as usize, Some(name.as_str()))
+        }
+        _ => source_start_range(source),
+    }
 }
 
 fn render_bytecode_error(filename: &str, source: &str, error: &BytecodeError) -> Vec<String> {
@@ -129,10 +138,6 @@ fn line_range(source: &str, line: usize, needle: Option<&str>) -> TextRange {
     if let Some(needle) = needle {
         if let Some(relative_start) = source[line_start..line_end].find(needle) {
             let start = line_start + relative_start;
-            return byte_range(start, start + needle.len());
-        }
-
-        if let Some(start) = source.find(needle) {
             return byte_range(start, start + needle.len());
         }
     }
@@ -184,6 +189,8 @@ fn lower_error_label(error: &LowerError) -> &'static str {
         LowerError::MissingMethodName => "name is missing",
         LowerError::MissingType => "type is missing",
         LowerError::MissingImportName => "import name is missing",
+        LowerError::UnknownImport { .. } => "unresolved import",
+        LowerError::UnknownType { .. } => "unresolved type",
         LowerError::UnsupportedTypeDeclaration => "unsupported declaration",
         LowerError::UnsupportedClassMember => "unsupported member",
         LowerError::ExpectedCompilationUnit => "expected Java source",
@@ -203,6 +210,10 @@ fn lower_error_help(error: &LowerError) -> &'static str {
         LowerError::MissingMethodName => "add the missing identifier",
         LowerError::MissingType => "add a valid Java type",
         LowerError::MissingImportName => "add a qualified import name",
+        LowerError::UnknownImport { .. } => {
+            "remove the import or add it to the supported class set"
+        }
+        LowerError::UnknownType { .. } => "import a supported class or use a known java.lang type",
         LowerError::UnsupportedTypeDeclaration => "use a class declaration",
         LowerError::UnsupportedClassMember => "remove or simplify this class member",
         LowerError::ExpectedCompilationUnit => "provide a Java compilation unit",

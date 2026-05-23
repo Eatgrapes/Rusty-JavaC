@@ -24,8 +24,21 @@ pub(super) fn first_ident(node: &JavaSyntaxNode) -> Option<JavaSyntaxToken> {
 
 pub(super) fn source_line(node: &JavaSyntaxNode) -> u16 {
     let root = node.ancestors().last().unwrap_or_else(|| node.clone());
-    let text = root.text().to_string();
     let start = u32::from(node.text_range().start()) as usize;
+    source_line_at(&root, start)
+}
+
+pub(super) fn token_source_line(token: &JavaSyntaxToken) -> u16 {
+    let Some(parent) = token.parent() else {
+        return 1;
+    };
+    let root = parent.ancestors().last().unwrap_or(parent);
+    let start = u32::from(token.text_range().start()) as usize;
+    source_line_at(&root, start)
+}
+
+fn source_line_at(root: &JavaSyntaxNode, start: usize) -> u16 {
+    let text = root.text().to_string();
     let offset = start.min(text.len());
     let line = text.as_bytes()[..offset]
         .iter()
