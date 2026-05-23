@@ -59,8 +59,7 @@ jobs:
           printf 'public class DemoApp {}\n' > target/ci-input/DemoApp.java
 
           cargo run --locked -p compiler-example -- \
-            target/ci-input/DemoApp.java \
-            target/compiler-example
+            target/ci-input/DemoApp.java
 
           javap -v -c target/compiler-example/DemoApp.class
 
