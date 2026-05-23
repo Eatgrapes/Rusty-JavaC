@@ -1,9 +1,12 @@
+mod catalog;
 pub mod java_io;
 pub mod java_lang;
 pub mod java_util;
 pub mod javax;
+pub mod platform;
 pub mod system;
 
+pub use catalog::ClassCatalog;
 use javac_ty::Ty;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,19 +28,11 @@ pub struct MethodRef {
 }
 
 pub fn resolve_class_name(simple_name: &str) -> Option<&'static str> {
-    system::class_name(simple_name)
-        .or_else(|| java_lang::class_name(simple_name))
-        .or_else(|| java_io::class_name(simple_name))
-        .or_else(|| java_util::class_name(simple_name))
-        .or_else(|| javax::class_name(simple_name))
+    platform::class_name(simple_name)
 }
 
 pub fn resolve_internal_class_name(internal_name: &str) -> Option<&'static str> {
-    system::internal_class_name(internal_name)
-        .or_else(|| java_lang::internal_class_name(internal_name))
-        .or_else(|| java_io::internal_class_name(internal_name))
-        .or_else(|| java_util::internal_class_name(internal_name))
-        .or_else(|| javax::internal_class_name(internal_name))
+    platform::internal_class_name(internal_name)
 }
 
 pub fn resolve_import(path: &str, is_wildcard: bool) -> Option<&'static str> {
@@ -49,11 +44,7 @@ pub fn resolve_import(path: &str, is_wildcard: bool) -> Option<&'static str> {
 }
 
 pub fn known_package(package: &str) -> bool {
-    system::package_name(package)
-        || java_lang::package_name(package)
-        || java_io::package_name(package)
-        || java_util::package_name(package)
-        || javax::package_name(package)
+    platform::package_name(package)
 }
 
 pub fn resolve_static_field(owner: &str, name: &str) -> Option<FieldRef> {

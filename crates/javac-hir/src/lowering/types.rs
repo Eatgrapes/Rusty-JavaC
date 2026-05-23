@@ -2,6 +2,7 @@ use crate::hir::{Import, Package};
 use crate::lowering::syntax::token_source_line;
 use crate::lowering::{LowerError, LowerResult};
 use javac_ast::{JavaSyntaxKind, JavaSyntaxNode, JavaSyntaxToken};
+use javac_call_resolver::ClassCatalog;
 use javac_ty::Ty;
 use std::collections::{HashMap, HashSet};
 use ustr::Ustr;
@@ -11,6 +12,7 @@ pub(super) struct TypeResolver {
     exact_imports: HashMap<String, String>,
     wildcard_imports: Vec<String>,
     current_class: Option<String>,
+    catalog: ClassCatalog,
 }
 
 impl TypeResolver {
@@ -18,11 +20,13 @@ impl TypeResolver {
         package: Option<&Package>,
         imports: &[Import],
         current_class: &str,
+        catalog: &ClassCatalog,
     ) -> LowerResult<Self> {
         let mut resolver = Self {
             exact_imports: HashMap::new(),
             wildcard_imports: Vec::new(),
             current_class: Some(current_class.to_string()),
+            catalog: catalog.clone(),
         };
 
         for import in imports {
@@ -59,15 +63,13 @@ impl TypeResolver {
             return Ok(Ty::Class(Ustr::from(internal.as_str())));
         }
 
-        if let Some(internal) = javac_call_resolver::resolve_class_name(name)
-            && internal.starts_with("java/lang/")
-        {
+        if let Some(internal) = self.catalog.resolve_java_lang(name) {
             return Ok(Ty::Class(Ustr::from(internal)));
         }
 
         for package in &self.wildcard_imports {
             let internal = format!("{package}/{name}");
-            if javac_call_resolver::resolve_internal_class_name(&internal).is_some() {
+            if self.catalog.contains_internal_class(&internal) {
                 return Ok(Ty::Class(Ustr::from(&internal)));
             }
         }
@@ -85,7 +87,7 @@ impl TypeResolver {
         }
 
         let path = import.path.as_str();
-        if javac_call_resolver::resolve_import(path, import.is_wildcard).is_none() {
+        if !self.catalog.resolve_import(path, import.is_wildcard) {
             return Err(LowerError::UnknownImport {
                 name: path.to_string(),
                 line,
@@ -108,8 +110,7 @@ impl TypeResolver {
     }
 
     fn resolve_qualified_type(&self, name: &str, line: u16) -> LowerResult<Ty> {
-        let internal = name.replace('.', "/");
-        if javac_call_resolver::resolve_internal_class_name(&internal).is_some() {
+        if let Some(internal) = self.catalog.resolve_qualified_name(name) {
             return Ok(Ty::Class(Ustr::from(&internal)));
         }
 

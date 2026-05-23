@@ -9,13 +9,17 @@ use javac_ast::ast::{
     AstNode, ClassDecl, CompilationUnit as AstCompilationUnit, ImportDecl as AstImportDecl,
 };
 use javac_ast::{JavaSyntaxKind, JavaSyntaxNode};
+use javac_call_resolver::ClassCatalog;
 use ustr::Ustr;
 
-pub(super) fn lower_compilation_unit(node: &JavaSyntaxNode) -> LowerResult<CompilationUnit> {
+pub(super) fn lower_compilation_unit(
+    node: &JavaSyntaxNode,
+    catalog: &ClassCatalog,
+) -> LowerResult<CompilationUnit> {
     let unit = AstCompilationUnit::cast(node.clone()).ok_or(LowerError::ExpectedCompilationUnit)?;
     let package = lower_package(&unit)?;
     let imports = lower_imports(&unit)?;
-    let type_decls = lower_top_level_types(node, package.as_ref(), &imports)?;
+    let type_decls = lower_top_level_types(node, package.as_ref(), &imports, catalog)?;
 
     Ok(CompilationUnit {
         package,
@@ -53,6 +57,7 @@ fn lower_top_level_types(
     node: &JavaSyntaxNode,
     package: Option<&Package>,
     imports: &[Import],
+    catalog: &ClassCatalog,
 ) -> LowerResult<Vec<TypeDecl>> {
     let mut pending_flags = 0;
     let mut type_decls = Vec::new();
@@ -61,7 +66,13 @@ fn lower_top_level_types(
             JavaSyntaxKind::ModifierList => pending_flags = access_flags(&child),
             JavaSyntaxKind::ClassDecl => {
                 let class = ClassDecl::cast(child).ok_or(LowerError::UnsupportedTypeDeclaration)?;
-                type_decls.push(lower_class_decl(class, pending_flags, package, imports)?);
+                type_decls.push(lower_class_decl(
+                    class,
+                    pending_flags,
+                    package,
+                    imports,
+                    catalog,
+                )?);
                 pending_flags = 0;
             }
             JavaSyntaxKind::InterfaceDecl
@@ -84,10 +95,11 @@ fn lower_class_decl(
     access_flags: u16,
     package: Option<&Package>,
     imports: &[Import],
+    catalog: &ClassCatalog,
 ) -> LowerResult<TypeDecl> {
     let name = class.name().ok_or(LowerError::MissingClassName)?;
     let internal_name = internal_class_name(package, name.text());
-    let resolver = TypeResolver::for_class(package, imports, &internal_name)?;
+    let resolver = TypeResolver::for_class(package, imports, &internal_name, catalog)?;
     let type_params = lower_type_params(class.syntax(), &resolver)?;
     let generic_signature = class_signature(class.syntax(), &type_params, &resolver)?;
     let members = class
