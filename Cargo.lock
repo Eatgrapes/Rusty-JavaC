@@ -226,6 +226,7 @@ dependencies = [
  "javac-call-resolver",
  "javac-ty",
  "la-arena",
+ "text-size",
  "thiserror",
  "ustr",
 ]

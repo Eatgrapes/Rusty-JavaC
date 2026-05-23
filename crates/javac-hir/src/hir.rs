@@ -2,6 +2,7 @@ use javac_ty::{MethodSig, Ty, TypeParam};
 use la_arena::{Arena, Idx};
 use std::collections::HashMap;
 use std::rc::Rc;
+use text_size::TextRange;
 use ustr::Ustr;
 
 pub type ExprId = Idx<Expr>;
@@ -28,6 +29,7 @@ pub struct Import {
     pub is_static: bool,
     pub is_wildcard: bool,
     pub source_line: Option<u16>,
+    pub source_range: Option<TextRange>,
 }
 
 #[derive(Debug, Clone)]

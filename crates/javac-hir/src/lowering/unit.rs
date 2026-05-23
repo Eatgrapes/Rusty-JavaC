@@ -2,7 +2,7 @@ use crate::hir::*;
 use crate::lowering::member::lower_class_members;
 use crate::lowering::modifiers::access_flags;
 use crate::lowering::signature::{class_signature, lower_type_params};
-use crate::lowering::syntax::{qualified_name_text, source_line};
+use crate::lowering::syntax::{qualified_name_text, qualified_name_text_range, source_line};
 use crate::lowering::types::TypeResolver;
 use crate::lowering::{LowerError, LowerResult};
 use javac_ast::ast::{
@@ -44,12 +44,13 @@ fn lower_imports(unit: &AstCompilationUnit) -> LowerResult<Vec<Import>> {
 }
 
 fn lower_import(import: AstImportDecl) -> LowerResult<Import> {
-    let path = qualified_name_text(import.syntax())?;
+    let (path, range) = qualified_name_text_range(import.syntax())?;
     Ok(Import {
         path: Ustr::from(&path),
         is_static: import.is_static(),
         is_wildcard: import.is_wildcard(),
         source_line: Some(source_line(import.syntax())),
+        source_range: Some(range),
     })
 }
 

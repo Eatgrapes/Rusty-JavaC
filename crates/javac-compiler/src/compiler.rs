@@ -102,7 +102,18 @@ fn render_lower_error(filename: &str, source: &str, error: &LowerError) -> Vec<S
 
 fn lower_error_range(source: &str, error: &LowerError) -> TextRange {
     match error {
-        LowerError::UnknownImport { name, line } | LowerError::UnknownType { name, line } => {
+        LowerError::UnknownImport {
+            name,
+            line,
+            range: Some(range),
+        } => validated_range(source, *range)
+            .unwrap_or_else(|| line_range(source, *line as usize, Some(name.as_str()))),
+        LowerError::UnknownImport {
+            name,
+            line,
+            range: None,
+        }
+        | LowerError::UnknownType { name, line } => {
             line_range(source, *line as usize, Some(name.as_str()))
         }
         _ => source_start_range(source),
@@ -164,6 +175,12 @@ fn byte_range(start: usize, end: usize) -> TextRange {
         TextSize::from(start.min(u32::MAX as usize) as u32),
         TextSize::from(end.min(u32::MAX as usize) as u32),
     )
+}
+
+fn validated_range(source: &str, range: TextRange) -> Option<TextRange> {
+    let start = u32::from(range.start()) as usize;
+    let end = u32::from(range.end()) as usize;
+    (start < end && end <= source.len()).then_some(range)
 }
 
 fn line_byte_bounds(source: &str, target_line: usize) -> (usize, usize) {

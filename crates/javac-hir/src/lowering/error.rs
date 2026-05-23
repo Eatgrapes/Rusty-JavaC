@@ -1,3 +1,5 @@
+use text_size::TextRange;
+
 pub type LowerResult<T> = Result<T, LowerError>;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -15,7 +17,11 @@ pub enum LowerError {
     #[error("import declaration is missing a name")]
     MissingImportName,
     #[error("cannot find symbol: import `{name}`")]
-    UnknownImport { name: String, line: u16 },
+    UnknownImport {
+        name: String,
+        line: u16,
+        range: Option<TextRange>,
+    },
     #[error("method declaration is missing a name")]
     MissingMethodName,
     #[error("type syntax is missing")]

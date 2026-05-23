@@ -91,6 +91,7 @@ impl TypeResolver {
             return Err(LowerError::UnknownImport {
                 name: path.to_string(),
                 line,
+                range: import.source_range,
             });
         }
 

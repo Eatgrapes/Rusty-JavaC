@@ -1,5 +1,6 @@
 use crate::lowering::{LowerError, LowerResult};
 use javac_ast::{JavaSyntaxKind, JavaSyntaxNode, JavaSyntaxToken};
+use text_size::TextRange;
 
 #[derive(Debug, Clone)]
 pub(super) struct ExprToken {
@@ -172,6 +173,11 @@ pub(super) fn case_pattern_tokens(label: &JavaSyntaxNode) -> Vec<ExprToken> {
 }
 
 pub(super) fn qualified_name_text(node: &JavaSyntaxNode) -> LowerResult<String> {
+    let (text, _) = qualified_name_text_range(node)?;
+    Ok(text)
+}
+
+pub(super) fn qualified_name_text_range(node: &JavaSyntaxNode) -> LowerResult<(String, TextRange)> {
     let Some(name) = node
         .descendants()
         .find(|child| child.kind() == JavaSyntaxKind::QualifiedName)
@@ -189,7 +195,7 @@ pub(super) fn qualified_name_text(node: &JavaSyntaxNode) -> LowerResult<String> 
     if text.is_empty() {
         Err(LowerError::MissingImportName)
     } else {
-        Ok(text)
+        Ok((text, name.text_range()))
     }
 }
 
