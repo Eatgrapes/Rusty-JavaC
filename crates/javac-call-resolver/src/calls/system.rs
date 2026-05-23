@@ -6,26 +6,7 @@ use ustr::Ustr;
 const SYSTEM_CLASS: &str = "java/lang/System";
 const PRINT_STREAM_CLASS: &str = "java/io/PrintStream";
 
-pub fn class_name(simple_name: &str) -> Option<&'static str> {
-    match simple_name {
-        "System" => Some(SYSTEM_CLASS),
-        _ => None,
-    }
-}
-
-pub fn internal_class_name(internal_name: &str) -> Option<&'static str> {
-    match internal_name {
-        SYSTEM_CLASS => Some(SYSTEM_CLASS),
-        PRINT_STREAM_CLASS => Some(PRINT_STREAM_CLASS),
-        _ => None,
-    }
-}
-
-pub fn package_name(package: &str) -> bool {
-    package == "java/lang" || package == "java/io"
-}
-
-pub fn resolve_static_field(owner: &str, name: &str) -> Option<FieldRef> {
+pub(super) fn resolve_static_field(owner: &str, name: &str) -> Option<FieldRef> {
     match (owner, name) {
         (SYSTEM_CLASS, "out") => Some(FieldRef {
             owner: SYSTEM_CLASS,
@@ -37,7 +18,7 @@ pub fn resolve_static_field(owner: &str, name: &str) -> Option<FieldRef> {
     }
 }
 
-pub fn resolve_instance_method(receiver: &Ty, name: &str, args: &[Ty]) -> Option<MethodRef> {
+pub(super) fn resolve_instance_method(receiver: &Ty, name: &str, args: &[Ty]) -> Option<MethodRef> {
     match (receiver.erasure(), name) {
         (Ty::Class(owner), "println") if owner.as_str() == PRINT_STREAM_CLASS => Some(MethodRef {
             owner: PRINT_STREAM_CLASS,

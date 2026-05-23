@@ -1,44 +1,12 @@
-use crate::{FieldRef, MethodRef};
+use crate::MethodRef;
 use javac_ty::Ty;
 use rust_asm::opcodes;
 
 const STRING_CLASS: &str = "java/lang/String";
 const OBJECT_CLASS: &str = "java/lang/Object";
-const INTEGER_CLASS: &str = "java/lang/Integer";
 const THROWABLE_CLASS: &str = "java/lang/Throwable";
-const ILLEGAL_ARGUMENT_EXCEPTION_CLASS: &str = "java/lang/IllegalArgumentException";
 
-pub fn class_name(simple_name: &str) -> Option<&'static str> {
-    match simple_name {
-        "String" => Some(STRING_CLASS),
-        "Object" => Some(OBJECT_CLASS),
-        "Integer" => Some(INTEGER_CLASS),
-        "Throwable" => Some(THROWABLE_CLASS),
-        "IllegalArgumentException" => Some(ILLEGAL_ARGUMENT_EXCEPTION_CLASS),
-        _ => None,
-    }
-}
-
-pub fn internal_class_name(internal_name: &str) -> Option<&'static str> {
-    match internal_name {
-        STRING_CLASS => Some(STRING_CLASS),
-        OBJECT_CLASS => Some(OBJECT_CLASS),
-        INTEGER_CLASS => Some(INTEGER_CLASS),
-        THROWABLE_CLASS => Some(THROWABLE_CLASS),
-        ILLEGAL_ARGUMENT_EXCEPTION_CLASS => Some(ILLEGAL_ARGUMENT_EXCEPTION_CLASS),
-        _ => None,
-    }
-}
-
-pub fn package_name(package: &str) -> bool {
-    package == "java/lang"
-}
-
-pub fn resolve_static_field(_owner: &str, _name: &str) -> Option<FieldRef> {
-    None
-}
-
-pub fn resolve_instance_method(receiver: &Ty, name: &str, args: &[Ty]) -> Option<MethodRef> {
+pub(super) fn resolve_instance_method(receiver: &Ty, name: &str, args: &[Ty]) -> Option<MethodRef> {
     match (receiver.erasure(), name, args) {
         (Ty::Class(owner), "hashCode", []) if owner.as_str() == OBJECT_CLASS => Some(MethodRef {
             owner: OBJECT_CLASS,
