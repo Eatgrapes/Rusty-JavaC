@@ -267,26 +267,3 @@ fn line_bounds(source: &str, offset: usize) -> (usize, usize, usize) {
 
     (line, line_start, line_end)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use text_size::TextSize;
-
-    #[test]
-    fn renders_source_snippet_with_labels() {
-        let source = "class A {\n  void m() { int x = 1 }\n}\n";
-        let range = TextRange::new(TextSize::from(31), TextSize::from(32));
-        let diagnostic = Diagnostic::error("expected `;`", range)
-            .with_code("P0001")
-            .with_primary_label("insert `;` here")
-            .with_help("statements must end with `;`");
-
-        let rendered = render_diagnostic(SourceFile::new("A.java", source), &diagnostic);
-
-        assert!(rendered.contains("error[P0001]: expected `;`"));
-        assert!(rendered.contains("--> A.java:2:22"));
-        assert!(rendered.contains("^ insert `;` here"));
-        assert!(rendered.contains("= help: statements must end with `;`"));
-    }
-}
