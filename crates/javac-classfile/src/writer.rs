@@ -298,6 +298,14 @@ fn add_extra_attributes(
     {
         cp.utf8("Exceptions");
     }
+    for metadata in field_metadata {
+        cp.utf8(&metadata.name);
+        cp.utf8(&metadata.descriptor);
+    }
+    for metadata in method_metadata {
+        cp.utf8(&metadata.name);
+        cp.utf8(&metadata.descriptor);
+    }
 
     if let Some(signature) = class_signature {
         add_signature_attribute(&mut class_node.attributes, &mut cp, signature);
