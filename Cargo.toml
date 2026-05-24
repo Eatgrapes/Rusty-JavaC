@@ -23,4 +23,4 @@ rust-asm = { version = "0.2", features = ["macros"] }
 text-size = "1.1"
 thiserror = "2.0"
 ustr = "1.1.0"
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
