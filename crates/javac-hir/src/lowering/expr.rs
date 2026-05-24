@@ -1,7 +1,8 @@
 use crate::hir::*;
+use crate::infer::{self, TypeEnvironment};
 use crate::lowering::literal;
 use crate::lowering::syntax::ExprToken;
-use crate::lowering::types::{TypeResolver, class_type_from_name, is_string_ty, lower_type};
+use crate::lowering::types::{TypeResolver, class_type_from_name, lower_type};
 use crate::lowering::{LowerError, LowerResult};
 use javac_ast::JavaSyntaxKind;
 use javac_ty::Ty;
@@ -73,10 +74,31 @@ impl BodyBuilder {
             self.collect_lambda_targets(stmt, method_return_ty, &mut targets);
         }
         for (expr_id, ty) in targets {
-            if let Expr::Lambda { target_ty: t, .. } = &mut self.body.exprs[expr_id] {
-                *t = Some(ty);
+            self.apply_lambda_target(expr_id, ty);
+        }
+    }
+
+    fn apply_lambda_target(&mut self, expr_id: ExprId, ty: Ty) {
+        let param_types = self.lambda_param_types(&ty);
+        let Expr::Lambda {
+            params, target_ty, ..
+        } = &mut self.body.exprs[expr_id]
+        else {
+            return;
+        };
+
+        *target_ty = Some(ty);
+        if let Some(param_types) = param_types {
+            for (param, ty) in params.iter_mut().zip(param_types) {
+                param.ty = Some(ty);
             }
         }
+    }
+
+    fn lambda_param_types(&self, target_ty: &Ty) -> Option<Vec<Ty>> {
+        self.type_resolver
+            .functional_interface_method(target_ty)
+            .map(|method| method.params)
     }
 
     fn collect_lambda_targets(
@@ -239,68 +261,7 @@ impl BodyBuilder {
     }
 
     pub(super) fn expr_ty(&self, expr_id: ExprId) -> Ty {
-        match &self.body.exprs[expr_id] {
-            Expr::IntLiteral(_) => Ty::Int,
-            Expr::LongLiteral(_) => Ty::Long,
-            Expr::FloatLiteral(_) => Ty::Float,
-            Expr::DoubleLiteral(_) => Ty::Double,
-            Expr::BoolLiteral(_) => Ty::Boolean,
-            Expr::CharLiteral(_) => Ty::Char,
-            Expr::StringLiteral(_) => Ty::string(),
-            Expr::NullLiteral => Ty::object(),
-            Expr::This | Expr::Super => Ty::object(),
-            Expr::Ident(name) => self.local_ty(*name).unwrap_or(Ty::Int),
-            Expr::ClassName(name) => Ty::Class(*name),
-            Expr::FieldAccess { target, field } => {
-                if let Some(owner) = self.static_class_name(*target)
-                    && let Some(field_ref) = self
-                        .type_resolver
-                        .resolve_static_field(owner.as_str(), field.as_str())
-                {
-                    field_ref.ty
-                } else {
-                    Ty::Int
-                }
-            }
-            Expr::MethodCall {
-                target,
-                method,
-                args,
-            } => self
-                .method_call_ty(*target, *method, args)
-                .unwrap_or(Ty::Int),
-            Expr::NewObject { class, .. } => class.clone(),
-            Expr::NewArray { element_type, .. } => Ty::Array(Box::new(element_type.clone())),
-            Expr::ArrayAccess { array, .. } => match self.expr_ty(*array) {
-                Ty::Array(element) => *element,
-                _ => Ty::Int,
-            },
-            Expr::Binary { op, left, right } => {
-                let left_ty = self.expr_ty(*left);
-                let right_ty = self.expr_ty(*right);
-                match op {
-                    BinaryOp::AndAnd
-                    | BinaryOp::OrOr
-                    | BinaryOp::Eq
-                    | BinaryOp::Ne
-                    | BinaryOp::Lt
-                    | BinaryOp::Gt
-                    | BinaryOp::Le
-                    | BinaryOp::Ge => Ty::Boolean,
-                    BinaryOp::Add if is_string_ty(&left_ty) || is_string_ty(&right_ty) => {
-                        Ty::string()
-                    }
-                    _ => numeric_result_ty(&left_ty, &right_ty),
-                }
-            }
-            Expr::Instanceof { .. } => Ty::Boolean,
-            Expr::Ternary { then_expr, .. } => self.expr_ty(*then_expr),
-            Expr::Switch { ty, .. } => ty.clone(),
-            Expr::Cast { ty, .. } => ty.clone(),
-            Expr::Assign { target, .. } => self.expr_ty(*target),
-            Expr::Parens(inner) => self.expr_ty(*inner),
-            _ => Ty::Int,
-        }
+        infer::expr_ty(self, &self.body, expr_id)
     }
 
     pub(super) fn alloc_expr(&mut self, expr: Expr) -> ExprId {
@@ -314,36 +275,35 @@ impl BodyBuilder {
     fn resolve_type_name(&self, name: &str) -> LowerResult<Ty> {
         class_type_from_name(name, 1, &self.type_resolver)
     }
+}
 
-    fn method_call_ty(&self, target: Option<ExprId>, method: Ustr, args: &[ExprId]) -> Option<Ty> {
-        let target = target?;
-        let receiver = self.expr_ty(target);
-        let arg_types = args
-            .iter()
-            .map(|arg| self.expr_ty(*arg))
-            .collect::<Vec<_>>();
+impl TypeEnvironment for BodyBuilder {
+    fn local_ty(&self, name: Ustr) -> Option<Ty> {
+        BodyBuilder::local_ty(self, name)
+    }
+
+    fn field_ty(&self, _name: Ustr) -> Option<Ty> {
+        None
+    }
+
+    fn resolve_static_field(&self, owner: &str, name: &str) -> Option<Ty> {
         self.type_resolver
-            .resolve_instance_method(&receiver, method.as_str(), &arg_types)
+            .resolve_static_field(owner, name)
+            .map(|field| field.ty)
+    }
+
+    fn resolve_instance_method(&self, receiver: &Ty, name: &str, args: &[Ty]) -> Option<Ty> {
+        self.type_resolver
+            .resolve_instance_method(receiver, name, args)
             .map(|method| method.return_ty)
     }
 
-    fn static_class_name(&self, expr_id: ExprId) -> Option<String> {
-        match &self.body.exprs[expr_id] {
-            Expr::ClassName(name) => Some(name.to_string()),
-            _ => None,
-        }
+    fn this_ty(&self) -> Ty {
+        self.type_resolver.current_class_ty()
     }
-}
 
-fn numeric_result_ty(left: &Ty, right: &Ty) -> Ty {
-    if left == &Ty::Double || right == &Ty::Double {
-        Ty::Double
-    } else if left == &Ty::Float || right == &Ty::Float {
-        Ty::Float
-    } else if left == &Ty::Long || right == &Ty::Long {
-        Ty::Long
-    } else {
-        Ty::Int
+    fn super_ty(&self) -> Ty {
+        Ty::object()
     }
 }
 
@@ -543,11 +503,19 @@ impl ExprLowerer<'_, '_> {
             }
             JavaSyntaxKind::FloatLiteral => {
                 self.pos += 1;
-                Ok(self
-                    .body
-                    .alloc_expr(Expr::FloatLiteral(literal::parse_float_literal(
-                        &token.text,
-                    ))))
+                if literal::has_float_suffix(&token.text) {
+                    Ok(self
+                        .body
+                        .alloc_expr(Expr::FloatLiteral(literal::parse_float_literal(
+                            &token.text,
+                        ))))
+                } else {
+                    Ok(self
+                        .body
+                        .alloc_expr(Expr::DoubleLiteral(literal::parse_double_literal(
+                            &token.text,
+                        ))))
+                }
             }
             JavaSyntaxKind::DoubleLiteral => {
                 self.pos += 1;
@@ -1001,8 +969,5 @@ fn is_primitive_type_token(kind: JavaSyntaxKind) -> bool {
 }
 
 fn lambda_param(name: Ustr) -> LambdaParam {
-    LambdaParam {
-        name,
-        ty: Some(Ty::object()),
-    }
+    LambdaParam { name, ty: None }
 }

@@ -89,27 +89,6 @@ pub(super) fn emit_method_call(
     false
 }
 
-pub(super) fn method_return_ty(
-    ctx: &CodegenCtx,
-    body: &Body,
-    target: Option<ExprId>,
-    method: Ustr,
-    args: &[ExprId],
-) -> Option<Ty> {
-    if let Some(target) = target {
-        let receiver = expr_ty(ctx, body, target);
-        let args = arg_types(ctx, body, args);
-        if let Some(method_ref) =
-            ctx.catalog
-                .resolve_instance_method(&receiver, method.as_str(), &args)
-        {
-            return Some(method_ref.return_ty);
-        }
-    }
-
-    ctx.method_sig(method).map(|sig| sig.return_type)
-}
-
 pub(super) fn static_field_ref(
     ctx: &CodegenCtx,
     body: &Body,

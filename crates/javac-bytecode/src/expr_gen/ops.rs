@@ -1,9 +1,10 @@
 use crate::codegen::CodegenCtx;
-use crate::expr_gen::convert::pop_ty;
+use crate::expr_gen::convert::{coerce, pop_ty};
 use crate::expr_gen::{expr_ty, gen_expr, is_string};
 use javac_classfile::{Label, MethodWriter};
 use javac_hir::hir::*;
 use javac_ty::Ty;
+use javac_ty::check::numeric_promotion;
 use rust_asm::opcodes;
 
 pub(super) fn emit_binary(
@@ -21,17 +22,25 @@ pub(super) fn emit_binary(
         BinaryOp::AndAnd => emit_short_circuit_and(mw, ctx, body, left, right),
         BinaryOp::OrOr => emit_short_circuit_or(mw, ctx, body, left, right),
         BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Gt | BinaryOp::Le | BinaryOp::Ge => {
+            let compare_ty = comparison_operand_ty(&left_ty, &right_ty);
             gen_expr(mw, ctx, body, left);
+            coerce(mw, &left_ty, &compare_ty);
             gen_expr(mw, ctx, body, right);
-            emit_comparison(mw, &op, &left_ty);
+            coerce(mw, &right_ty, &compare_ty);
+            emit_comparison(mw, &op, &compare_ty);
         }
         BinaryOp::Add if is_string(&left_ty) || is_string(&right_ty) => {
             emit_string_concat(mw, ctx, body, left, right);
         }
         _ => {
+            let result_ty = numeric_operand_ty(&op, &left_ty, &right_ty);
             gen_expr(mw, ctx, body, left);
+            coerce(mw, &left_ty, &result_ty);
             gen_expr(mw, ctx, body, right);
-            emit_arithmetic(mw, &op, &left_ty);
+            if !matches!(op, BinaryOp::Shl | BinaryOp::Shr | BinaryOp::Ushr) {
+                coerce(mw, &right_ty, &result_ty);
+            }
+            emit_arithmetic(mw, &op, &result_ty);
         }
     }
 }
@@ -292,6 +301,24 @@ fn emit_arithmetic(mw: &mut MethodWriter, op: &BinaryOp, ty: &Ty) {
             opcodes::IUSHR
         }),
         _ => pop_ty(mw, ty),
+    }
+}
+
+fn numeric_operand_ty(op: &BinaryOp, left: &Ty, right: &Ty) -> Ty {
+    if matches!(op, BinaryOp::Shl | BinaryOp::Shr | BinaryOp::Ushr) {
+        return shift_left_operand_ty(left);
+    }
+    numeric_promotion(left, right).unwrap_or_else(|| left.clone())
+}
+
+fn comparison_operand_ty(left: &Ty, right: &Ty) -> Ty {
+    numeric_promotion(left, right).unwrap_or_else(|| left.clone())
+}
+
+fn shift_left_operand_ty(ty: &Ty) -> Ty {
+    match ty {
+        Ty::Byte | Ty::Short | Ty::Char => Ty::Int,
+        _ => ty.clone(),
     }
 }
 

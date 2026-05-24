@@ -97,6 +97,20 @@ impl TypeResolver {
         self.catalog.resolve_static_field(owner, name)
     }
 
+    pub fn functional_interface_method(&self, ty: &Ty) -> Option<javac_call_resolver::MethodRef> {
+        let Ty::Class(name) = ty.erasure() else {
+            return None;
+        };
+        self.catalog.functional_interface_method(name.as_str())
+    }
+
+    pub fn current_class_ty(&self) -> Ty {
+        self.current_class
+            .as_deref()
+            .map(Ty::class)
+            .unwrap_or_else(Ty::object)
+    }
+
     pub fn resolve_class_reference(&self, name: &str) -> Option<String> {
         if let Some(current_class) = self.current_class_name(name) {
             return Some(current_class.to_string());
@@ -189,10 +203,6 @@ pub(super) fn is_var_type(node: &JavaSyntaxNode) -> bool {
     node.descendants_with_tokens()
         .filter_map(|element| element.into_token())
         .any(|token| token.kind() == JavaSyntaxKind::VarKw)
-}
-
-pub(super) fn is_string_ty(ty: &Ty) -> bool {
-    ty.is_string()
 }
 
 pub(super) fn class_type_from_name(

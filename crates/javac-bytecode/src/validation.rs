@@ -10,6 +10,7 @@ use diagnostic::{
 };
 use javac_call_resolver::ClassCatalog;
 use javac_hir::hir::*;
+use javac_hir::infer::{self, TypeEnvironment};
 use javac_ty::{MethodSig, Ty};
 use scope::MethodScope;
 use std::collections::HashMap;
@@ -481,106 +482,57 @@ impl Validator {
     }
 
     fn expr_ty(&self, body: &Body, scope: &MethodScope, expr_id: ExprId) -> Ty {
-        match &body.exprs[expr_id] {
-            Expr::Ident(name) => scope
-                .locals
-                .get(name)
-                .cloned()
-                .or_else(|| self.fields.get(name).map(|field| field.ty.clone()))
-                .unwrap_or_else(|| self.intrinsic_expr_ty(body, scope, expr_id)),
-            Expr::ClassName(name) => Ty::Class(*name),
-            Expr::FieldAccess { target, field } => {
-                if let Some(owner) = static_class_name(body, *target)
-                    && let Some(field_ref) =
-                        self.catalog.resolve_static_field(owner, field.as_str())
-                {
-                    return field_ref.ty;
-                }
-                if is_current_instance(body, *target)
-                    && let Some(field) = self.fields.get(field)
-                {
-                    return field.ty.clone();
-                }
-                self.intrinsic_expr_ty(body, scope, expr_id)
-            }
-            Expr::MethodCall {
-                target,
-                method,
-                args,
-            } => {
-                let arg_types = args
-                    .iter()
-                    .map(|arg| self.expr_ty(body, scope, *arg))
-                    .collect::<Vec<_>>();
-                if let Some(target) = target {
-                    let receiver = self.expr_ty(body, scope, *target);
-                    if let Some(method_ref) =
-                        self.catalog
-                            .resolve_instance_method(&receiver, method.as_str(), &arg_types)
-                    {
-                        return method_ref.return_ty;
-                    }
-                }
-                self.methods
-                    .get(method)
-                    .map(|sig| sig.return_type.clone())
-                    .unwrap_or_else(|| self.intrinsic_expr_ty(body, scope, expr_id))
-            }
-            Expr::Binary { op, left, right } => match op {
-                BinaryOp::AndAnd
-                | BinaryOp::OrOr
-                | BinaryOp::Eq
-                | BinaryOp::Ne
-                | BinaryOp::Lt
-                | BinaryOp::Gt
-                | BinaryOp::Le
-                | BinaryOp::Ge => Ty::Boolean,
-                BinaryOp::Add
-                    if is_string(&self.expr_ty(body, scope, *left))
-                        || is_string(&self.expr_ty(body, scope, *right)) =>
-                {
-                    Ty::string()
-                }
-                _ => self.expr_ty(body, scope, *left),
+        infer::expr_ty(
+            &ValidationTypeEnv {
+                validator: self,
+                scope,
             },
-            Expr::Unary { op, operand } => match op {
-                UnaryOp::Not => Ty::Boolean,
-                _ => self.expr_ty(body, scope, *operand),
-            },
-            Expr::NewArray { element_type, .. } => Ty::Array(Box::new(element_type.clone())),
-            Expr::ArrayAccess { array, .. } => match self.expr_ty(body, scope, *array) {
-                Ty::Array(element) => *element,
-                _ => Ty::Int,
-            },
-            Expr::Ternary { then_expr, .. } => self.expr_ty(body, scope, *then_expr),
-            Expr::Assign { target, .. } => self.expr_ty(body, scope, *target),
-            Expr::Parens(inner) => self.expr_ty(body, scope, *inner),
-            Expr::Cast { ty, .. } => ty.clone(),
-            Expr::Instanceof { .. } => Ty::Boolean,
-            Expr::Switch { ty, .. } => ty.clone(),
-            _ => self.intrinsic_expr_ty(body, scope, expr_id),
-        }
+            body,
+            expr_id,
+        )
+    }
+}
+
+struct ValidationTypeEnv<'a> {
+    validator: &'a Validator,
+    scope: &'a MethodScope,
+}
+
+impl TypeEnvironment for ValidationTypeEnv<'_> {
+    fn local_ty(&self, name: Ustr) -> Option<Ty> {
+        self.scope.locals.get(&name).cloned()
     }
 
-    fn intrinsic_expr_ty(&self, body: &Body, scope: &MethodScope, expr_id: ExprId) -> Ty {
-        match &body.exprs[expr_id] {
-            Expr::IntLiteral(_) => Ty::Int,
-            Expr::LongLiteral(_) => Ty::Long,
-            Expr::FloatLiteral(_) => Ty::Float,
-            Expr::DoubleLiteral(_) => Ty::Double,
-            Expr::BoolLiteral(_) => Ty::Boolean,
-            Expr::CharLiteral(_) => Ty::Char,
-            Expr::StringLiteral(_) => Ty::string(),
-            Expr::NullLiteral | Expr::This | Expr::Super => Ty::object(),
-            Expr::ClassName(name) => Ty::Class(*name),
-            Expr::NewObject { class, .. } => class.clone(),
-            Expr::Lambda { .. } | Expr::MethodRef { .. } => Ty::object(),
-            Expr::PostInc(inner) | Expr::PostDec(inner) | Expr::Parens(inner) => {
-                self.expr_ty(body, scope, *inner)
-            }
-            Expr::Assign { value, .. } => self.expr_ty(body, scope, *value),
-            _ => Ty::Int,
-        }
+    fn field_ty(&self, name: Ustr) -> Option<Ty> {
+        self.validator
+            .fields
+            .get(&name)
+            .map(|field| field.ty.clone())
+    }
+
+    fn resolve_static_field(&self, owner: &str, name: &str) -> Option<Ty> {
+        self.validator
+            .catalog
+            .resolve_static_field(owner, name)
+            .map(|field| field.ty)
+    }
+
+    fn resolve_instance_method(&self, receiver: &Ty, name: &str, args: &[Ty]) -> Option<Ty> {
+        self.validator
+            .catalog
+            .resolve_instance_method(receiver, name, args)
+            .map(|method| method.return_ty)
+    }
+
+    fn resolve_current_method(&self, name: Ustr, _args: &[Ty]) -> Option<Ty> {
+        self.validator
+            .methods
+            .get(&name)
+            .map(|sig| sig.return_type.clone())
+    }
+
+    fn this_ty(&self) -> Ty {
+        Ty::Class(self.validator.class_name)
     }
 }
 
@@ -611,8 +563,4 @@ fn pattern_binding(body: &Body, expr_id: ExprId) -> Option<(Ustr, Ty)> {
         Expr::Parens(inner) => pattern_binding(body, *inner),
         _ => None,
     }
-}
-
-fn is_string(ty: &Ty) -> bool {
-    ty.is_string()
 }

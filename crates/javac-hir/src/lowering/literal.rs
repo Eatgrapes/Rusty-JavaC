@@ -22,6 +22,10 @@ pub(super) fn parse_double_literal(text: &str) -> f64 {
         .unwrap_or(0.0)
 }
 
+pub(super) fn has_float_suffix(text: &str) -> bool {
+    text.ends_with(['f', 'F'])
+}
+
 pub(super) fn parse_char_literal(text: &str) -> char {
     let value = text
         .strip_prefix('\'')

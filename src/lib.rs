@@ -52,6 +52,8 @@ pub use parser::{Parse, ParseError, Parser};
 
 #[path = "../crates/javac-hir/src/hir.rs"]
 pub mod hir;
+#[path = "../crates/javac-hir/src/infer.rs"]
+pub mod infer;
 #[path = "../crates/javac-hir/src/item.rs"]
 pub mod item;
 #[path = "../crates/javac-hir/src/lowering.rs"]
