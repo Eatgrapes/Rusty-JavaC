@@ -106,6 +106,66 @@ fn gen_fields(writer: &mut ClassFileWriter, fields: &[FieldDecl]) {
     }
 }
 
+struct SamInfo {
+    interface: String,
+    method_name: String,
+    method_type: String,
+    return_ty: Ty,
+}
+
+fn resolve_sam_interface(expr: &Expr, catalog: &ClassCatalog, param_count: usize) -> SamInfo {
+    if let Expr::Lambda {
+        target_ty: Some(Ty::Class(name)),
+        ..
+    } = expr
+    {
+        if let Some(method) = catalog.functional_interface_method(name) {
+            let (method_type, return_ty) = erased_descriptor_from_method_ref(&method);
+            return SamInfo {
+                interface: name.to_string(),
+                method_name: method.name.clone(),
+                method_type,
+                return_ty,
+            };
+        }
+    }
+    match param_count {
+        0 => SamInfo {
+            interface: "java/util/function/Supplier".into(),
+            method_name: "get".into(),
+            method_type: "()Ljava/lang/Object;".into(),
+            return_ty: Ty::object(),
+        },
+        1 => SamInfo {
+            interface: "java/util/function/Function".into(),
+            method_name: "apply".into(),
+            method_type: "(Ljava/lang/Object;)Ljava/lang/Object;".into(),
+            return_ty: Ty::object(),
+        },
+        _ => SamInfo {
+            interface: "java/util/function/BiFunction".into(),
+            method_name: "apply".into(),
+            method_type: "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;".into(),
+            return_ty: Ty::object(),
+        },
+    }
+}
+
+fn erased_descriptor_from_method_ref(mr: &javac_call_resolver::MethodRef) -> (String, Ty) {
+    let param_descs: String = mr
+        .params
+        .iter()
+        .map(|_| "Ljava/lang/Object;")
+        .collect::<Vec<_>>()
+        .join("");
+    let (ret, return_ty) = if matches!(mr.return_ty, Ty::Void) {
+        ("V", Ty::Void)
+    } else {
+        ("Ljava/lang/Object;", Ty::object())
+    };
+    (format!("({}){}", param_descs, ret), return_ty)
+}
+
 fn scan_and_gen_lambdas(
     writer: &mut ClassFileWriter,
     type_decl: &TypeDecl,
@@ -119,33 +179,21 @@ fn scan_and_gen_lambdas(
         if let Expr::Lambda {
             params,
             body: lambda_body,
+            ..
         } = expr
         {
             let synthetic_name = format!("lambda${}${}", method.name, counter);
             *counter += 1;
 
-            let param_count = params.len();
-            let (sam_interface, sam_method_name, sam_method_type) = match param_count {
-                0 => ("java/util/function/Supplier", "get", "()Ljava/lang/Object;"),
-                1 => (
-                    "java/util/function/Function",
-                    "apply",
-                    "(Ljava/lang/Object;)Ljava/lang/Object;",
-                ),
-                _ => (
-                    "java/util/function/BiFunction",
-                    "apply",
-                    "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
-                ),
-            };
+            let sam_info = resolve_sam_interface(expr, catalog, params.len());
 
             let param_descs: String = params
                 .iter()
                 .map(|_| "Ljava/lang/Object;")
                 .collect::<Vec<_>>()
                 .join("");
-            let impl_descriptor = format!("({})Ljava/lang/Object;", param_descs);
-            let sam_descriptor = format!("()L{};", sam_interface);
+            let impl_descriptor = format!("({}){}", param_descs, sam_info.return_ty.descriptor());
+            let sam_descriptor = format!("()L{};", sam_info.interface);
 
             let impl_method_handle = Handle {
                 reference_kind: rust_asm::constants::REF_INVOKE_STATIC,
@@ -170,7 +218,7 @@ fn scan_and_gen_lambdas(
                 ctx.set_fields(&type_decl.fields);
                 ctx.set_methods(&type_decl.methods);
 
-                ctx.return_ty = Ty::object();
+                ctx.return_ty = sam_info.return_ty.clone();
                 ctx.next_local = 0;
                 ctx.locals.clear();
                 ctx.local_types.clear();
@@ -193,8 +241,10 @@ fn scan_and_gen_lambdas(
                         mw.visit_insn(return_opcode(&body_ty));
                     }
                     LambdaBody::Block(_block) => {
-                        mw.visit_insn(opcodes::ACONST_NULL);
-                        mw.visit_insn(opcodes::ARETURN);
+                        if sam_info.return_ty != Ty::Void {
+                            mw.visit_insn(opcodes::ACONST_NULL);
+                        }
+                        mw.visit_insn(return_opcode(&sam_info.return_ty));
                     }
                 }
 
@@ -206,9 +256,9 @@ fn scan_and_gen_lambdas(
                 expr_id,
                 LambdaInfo {
                     synthetic_name,
-                    sam_interface: sam_interface.to_string(),
-                    sam_method_name: sam_method_name.to_string(),
-                    sam_method_type: sam_method_type.to_string(),
+                    sam_interface: sam_info.interface.clone(),
+                    sam_method_name: sam_info.method_name.clone(),
+                    sam_method_type: sam_info.method_type.clone(),
                     sam_descriptor: sam_descriptor.to_string(),
                     impl_descriptor,
                     params: params.clone(),

@@ -333,10 +333,22 @@ impl Validator {
                 }
                 Ok(())
             }
-            Expr::Lambda { body: lambda, .. } => match lambda {
-                LambdaBody::Expr(expr) => self.validate_expr(body, scope, *expr),
-                LambdaBody::Block(block) => self.validate_block(body, &mut scope.clone(), block),
-            },
+            Expr::Lambda {
+                params,
+                body: lambda,
+                ..
+            } => {
+                let mut lambda_scope = scope.clone();
+                for param in params {
+                    lambda_scope
+                        .locals
+                        .insert(param.name, param.ty.clone().unwrap_or(Ty::object()));
+                }
+                match lambda {
+                    LambdaBody::Expr(expr) => self.validate_expr(body, &mut lambda_scope, *expr),
+                    LambdaBody::Block(block) => self.validate_block(body, &mut lambda_scope, block),
+                }
+            }
             Expr::MethodRef { target, .. } => self.validate_expr(body, scope, *target),
             Expr::IntLiteral(_)
             | Expr::LongLiteral(_)

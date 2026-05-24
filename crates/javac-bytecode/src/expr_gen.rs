@@ -121,7 +121,7 @@ pub fn gen_expr(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, expr_i
             gen_expr(mw, ctx, body, *expr);
             mw.visit_type_insn(opcodes::INSTANCEOF, &ty.internal_name());
         }
-        Expr::Lambda { params: _, body: _ } => {
+        Expr::Lambda { .. } => {
             emit_lambda(mw, ctx, expr_id);
         }
         _ => push_default_value(mw, &expr_ty(ctx, body, expr_id)),
