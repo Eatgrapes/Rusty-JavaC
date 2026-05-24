@@ -9,6 +9,7 @@ use rust_asm::opcodes;
 
 const OBJECT_CLASS: &str = "java/lang/Object";
 const INIT_METHOD: &str = "<init>";
+const CLINIT_METHOD: &str = "<clinit>";
 
 pub fn gen_class(unit: &CompilationUnit) -> Result<Vec<u8>, BytecodeError> {
     let catalog = ClassCatalog::platform();
@@ -48,6 +49,7 @@ fn gen_type_decl(writer: &mut ClassFileWriter, type_decl: &TypeDecl, catalog: &C
     }
 
     gen_fields(writer, &type_decl.fields);
+    gen_static_initializer(writer, type_decl, catalog);
     if needs_default_constructor(type_decl) {
         gen_default_constructor(writer, type_decl, &super_name, catalog);
     }
@@ -110,6 +112,26 @@ fn gen_method(
         mw.visit_maxs(0, 0);
     }
 
+    mw.visit_end(writer);
+}
+
+fn gen_static_initializer(
+    writer: &mut ClassFileWriter,
+    type_decl: &TypeDecl,
+    catalog: &ClassCatalog,
+) {
+    if !has_static_field_initializers(&type_decl.fields) {
+        return;
+    }
+
+    let mut mw = writer.visit_method(javac_classfile::ACC_STATIC, CLINIT_METHOD, "()V");
+    mw.visit_code();
+    let mut ctx = CodegenCtx::new(writer, type_decl.name, catalog);
+    ctx.set_fields(&type_decl.fields);
+    ctx.set_methods(&type_decl.methods);
+    emit_static_field_initializers(&mut mw, &mut ctx, &type_decl.fields);
+    mw.visit_insn(opcodes::RETURN);
+    mw.visit_maxs(0, 0);
     mw.visit_end(writer);
 }
 
@@ -185,6 +207,12 @@ fn needs_default_constructor(type_decl: &TypeDecl) -> bool {
             .any(|method| method.name == INIT_METHOD)
 }
 
+fn has_static_field_initializers(fields: &[FieldDecl]) -> bool {
+    fields.iter().any(|field| {
+        field.access_flags & javac_classfile::ACC_STATIC != 0 && field.initializer.is_some()
+    })
+}
+
 fn gen_default_constructor(
     writer: &mut ClassFileWriter,
     type_decl: &TypeDecl,
@@ -230,6 +258,31 @@ fn emit_instance_field_initializers(
         crate::expr_gen::coerce(mw, &value_ty, &field.ty);
         mw.visit_field_insn(
             opcodes::PUTFIELD,
+            ctx.class_name.as_str(),
+            field.name.as_str(),
+            &field.ty.descriptor(),
+        );
+    }
+}
+
+fn emit_static_field_initializers(
+    mw: &mut javac_classfile::MethodWriter,
+    ctx: &mut CodegenCtx,
+    fields: &[FieldDecl],
+) {
+    for field in fields {
+        if field.access_flags & javac_classfile::ACC_STATIC == 0 {
+            continue;
+        }
+        let Some(initializer) = field.initializer else {
+            continue;
+        };
+
+        crate::expr_gen::gen_expr(mw, ctx, &field.body, initializer);
+        let value_ty = crate::expr_gen::expr_ty(ctx, &field.body, initializer);
+        crate::expr_gen::coerce(mw, &value_ty, &field.ty);
+        mw.visit_field_insn(
+            opcodes::PUTSTATIC,
             ctx.class_name.as_str(),
             field.name.as_str(),
             &field.ty.descriptor(),

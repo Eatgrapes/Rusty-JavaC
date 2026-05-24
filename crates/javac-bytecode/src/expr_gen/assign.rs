@@ -22,6 +22,13 @@ pub(super) fn emit_assign(
         return;
     }
 
+    if let Expr::Ident(name) = &body.exprs[target]
+        && ctx.field_is_static(*name)
+    {
+        emit_static_field_assign(mw, ctx, body, *name, op, value);
+        return;
+    }
+
     if let Expr::FieldAccess { target, field } = body.exprs[target].clone()
         && matches!(op, AssignOp::Plain)
         && super::values::is_current_instance(body, target)
@@ -98,6 +105,13 @@ pub(super) fn emit_inc_dec_for_effect(
         return true;
     }
 
+    if let Expr::Ident(name) = &body.exprs[target]
+        && ctx.field_is_static(*name)
+    {
+        emit_static_field_inc_dec_for_effect(mw, ctx, *name, amount);
+        return true;
+    }
+
     false
 }
 
@@ -125,6 +139,43 @@ fn emit_local_assign(
 
     dup_ty(mw, &ty);
     mw.visit_var_insn(store_opcode(&ty), slot);
+}
+
+fn emit_static_field_assign(
+    mw: &mut MethodWriter,
+    ctx: &mut CodegenCtx,
+    body: &Body,
+    name: ustr::Ustr,
+    op: &AssignOp,
+    value: ExprId,
+) {
+    let ty = ctx
+        .field_ty(name)
+        .unwrap_or_else(|| expr_ty(ctx, body, value));
+
+    if !matches!(op, AssignOp::Plain) {
+        mw.visit_field_insn(
+            opcodes::GETSTATIC,
+            ctx.class_name.as_str(),
+            name.as_str(),
+            &ty.descriptor(),
+        );
+    }
+
+    gen_expr(mw, ctx, body, value);
+    coerce(mw, &expr_ty(ctx, body, value), &ty);
+
+    if !matches!(op, AssignOp::Plain) {
+        super::ops::emit_assign_op(mw, op, &ty);
+    }
+
+    dup_ty(mw, &ty);
+    mw.visit_field_insn(
+        opcodes::PUTSTATIC,
+        ctx.class_name.as_str(),
+        name.as_str(),
+        &ty.descriptor(),
+    );
 }
 
 fn emit_static_field_pre_inc_dec(
@@ -165,6 +216,29 @@ fn emit_static_field_post_inc_dec(
         &ty.descriptor(),
     );
     dup_ty(mw, &ty);
+    super::literals::emit_int(mw, amount as i64);
+    super::ops::emit_assign_op(mw, &AssignOp::Add, &ty);
+    mw.visit_field_insn(
+        opcodes::PUTSTATIC,
+        ctx.class_name.as_str(),
+        name.as_str(),
+        &ty.descriptor(),
+    );
+}
+
+fn emit_static_field_inc_dec_for_effect(
+    mw: &mut MethodWriter,
+    ctx: &CodegenCtx,
+    name: ustr::Ustr,
+    amount: i16,
+) {
+    let ty = ctx.field_ty(name).unwrap_or(Ty::Int);
+    mw.visit_field_insn(
+        opcodes::GETSTATIC,
+        ctx.class_name.as_str(),
+        name.as_str(),
+        &ty.descriptor(),
+    );
     super::literals::emit_int(mw, amount as i64);
     super::ops::emit_assign_op(mw, &AssignOp::Add, &ty);
     mw.visit_field_insn(
