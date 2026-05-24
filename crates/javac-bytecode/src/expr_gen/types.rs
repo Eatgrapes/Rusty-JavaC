@@ -15,7 +15,7 @@ pub(crate) fn expr_ty(ctx: &CodegenCtx, body: &Body, expr_id: ExprId) -> Ty {
             } else if values::is_current_instance(body, *target) {
                 ctx.field_ty(*field).unwrap_or(Ty::Int)
             } else {
-                body.exprs[expr_id].ty(&body.exprs)
+                intrinsic_expr_ty(ctx, body, expr_id)
             }
         }
         Expr::MethodCall {
@@ -23,7 +23,7 @@ pub(crate) fn expr_ty(ctx: &CodegenCtx, body: &Body, expr_id: ExprId) -> Ty {
             method,
             args,
         } => calls::method_return_ty(ctx, body, *target, *method, args)
-            .unwrap_or_else(|| body.exprs[expr_id].ty(&body.exprs)),
+            .unwrap_or_else(|| intrinsic_expr_ty(ctx, body, expr_id)),
         Expr::Binary { op, left, right } => match op {
             BinaryOp::AndAnd
             | BinaryOp::OrOr
@@ -56,6 +56,27 @@ pub(crate) fn expr_ty(ctx: &CodegenCtx, body: &Body, expr_id: ExprId) -> Ty {
         Expr::Cast { ty, .. } => ty.clone(),
         Expr::Instanceof { .. } => Ty::Boolean,
         Expr::Switch { ty, .. } => ty.clone(),
-        _ => body.exprs[expr_id].ty(&body.exprs),
+        _ => intrinsic_expr_ty(ctx, body, expr_id),
+    }
+}
+
+fn intrinsic_expr_ty(ctx: &CodegenCtx, body: &Body, expr_id: ExprId) -> Ty {
+    match &body.exprs[expr_id] {
+        Expr::IntLiteral(_) => Ty::Int,
+        Expr::LongLiteral(_) => Ty::Long,
+        Expr::FloatLiteral(_) => Ty::Float,
+        Expr::DoubleLiteral(_) => Ty::Double,
+        Expr::BoolLiteral(_) => Ty::Boolean,
+        Expr::CharLiteral(_) => Ty::Char,
+        Expr::StringLiteral(_) => Ty::string(),
+        Expr::NullLiteral | Expr::This | Expr::Super => Ty::object(),
+        Expr::ClassName(name) => Ty::Class(*name),
+        Expr::NewObject { class, .. } => class.clone(),
+        Expr::Lambda { .. } | Expr::MethodRef { .. } => Ty::object(),
+        Expr::PostInc(inner) | Expr::PostDec(inner) | Expr::Parens(inner) => {
+            expr_ty(ctx, body, *inner)
+        }
+        Expr::Assign { value, .. } => expr_ty(ctx, body, *value),
+        _ => Ty::Int,
     }
 }

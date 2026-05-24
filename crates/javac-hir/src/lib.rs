@@ -1,4 +1,3 @@
-pub mod body;
 pub mod hir;
 pub mod item;
 pub mod lowering;

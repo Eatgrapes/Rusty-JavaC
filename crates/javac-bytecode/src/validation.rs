@@ -470,7 +470,7 @@ impl Validator {
                 .get(name)
                 .cloned()
                 .or_else(|| self.fields.get(name).map(|field| field.ty.clone()))
-                .unwrap_or_else(|| body.exprs[expr_id].ty(&body.exprs)),
+                .unwrap_or_else(|| self.intrinsic_expr_ty(body, scope, expr_id)),
             Expr::ClassName(name) => Ty::Class(*name),
             Expr::FieldAccess { target, field } => {
                 if let Some(owner) = static_class_name(body, *target)
@@ -484,7 +484,7 @@ impl Validator {
                 {
                     return field.ty.clone();
                 }
-                body.exprs[expr_id].ty(&body.exprs)
+                self.intrinsic_expr_ty(body, scope, expr_id)
             }
             Expr::MethodCall {
                 target,
@@ -507,7 +507,7 @@ impl Validator {
                 self.methods
                     .get(method)
                     .map(|sig| sig.return_type.clone())
-                    .unwrap_or_else(|| body.exprs[expr_id].ty(&body.exprs))
+                    .unwrap_or_else(|| self.intrinsic_expr_ty(body, scope, expr_id))
             }
             Expr::Binary { op, left, right } => match op {
                 BinaryOp::AndAnd
@@ -541,7 +541,28 @@ impl Validator {
             Expr::Cast { ty, .. } => ty.clone(),
             Expr::Instanceof { .. } => Ty::Boolean,
             Expr::Switch { ty, .. } => ty.clone(),
-            _ => body.exprs[expr_id].ty(&body.exprs),
+            _ => self.intrinsic_expr_ty(body, scope, expr_id),
+        }
+    }
+
+    fn intrinsic_expr_ty(&self, body: &Body, scope: &MethodScope, expr_id: ExprId) -> Ty {
+        match &body.exprs[expr_id] {
+            Expr::IntLiteral(_) => Ty::Int,
+            Expr::LongLiteral(_) => Ty::Long,
+            Expr::FloatLiteral(_) => Ty::Float,
+            Expr::DoubleLiteral(_) => Ty::Double,
+            Expr::BoolLiteral(_) => Ty::Boolean,
+            Expr::CharLiteral(_) => Ty::Char,
+            Expr::StringLiteral(_) => Ty::string(),
+            Expr::NullLiteral | Expr::This | Expr::Super => Ty::object(),
+            Expr::ClassName(name) => Ty::Class(*name),
+            Expr::NewObject { class, .. } => class.clone(),
+            Expr::Lambda { .. } | Expr::MethodRef { .. } => Ty::object(),
+            Expr::PostInc(inner) | Expr::PostDec(inner) | Expr::Parens(inner) => {
+                self.expr_ty(body, scope, *inner)
+            }
+            Expr::Assign { value, .. } => self.expr_ty(body, scope, *value),
+            _ => Ty::Int,
         }
     }
 }
