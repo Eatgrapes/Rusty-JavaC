@@ -45,7 +45,8 @@ cargo add rusty-javac
 or add
 ```toml
 rusty-javac = "VERSION"
-``` to your cargo.toml
+```
+to your cargo.toml
 
 ## Library Goal
 
