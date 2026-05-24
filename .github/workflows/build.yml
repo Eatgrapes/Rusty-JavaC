@@ -58,7 +58,8 @@ jobs:
           mkdir -p target/ci-input target/compiler-example
           printf 'public class DemoApp {}\n' > target/ci-input/DemoApp.java
 
-          cargo run --locked -p compiler-example -- \
+          cargo run --locked --example compiler-example -- \
+            --output-dir target/compiler-example \
             target/ci-input/DemoApp.java
 
           javap -v -c target/compiler-example/DemoApp.class
