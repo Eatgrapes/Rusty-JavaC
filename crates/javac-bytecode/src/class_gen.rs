@@ -193,7 +193,8 @@ fn scan_and_gen_lambdas(
                         mw.visit_insn(return_opcode(&body_ty));
                     }
                     LambdaBody::Block(_block) => {
-                        mw.visit_insn(opcodes::RETURN);
+                        mw.visit_insn(opcodes::ACONST_NULL);
+                        mw.visit_insn(opcodes::ARETURN);
                     }
                 }
 
