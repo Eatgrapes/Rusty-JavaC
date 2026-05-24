@@ -1,11 +1,10 @@
-use javac_ast::{JavaLanguage, JavaSyntaxKind};
-use javac_parser::{Parse, Parser};
 use rowan::SyntaxNode;
+use rusty_javac::{JavaLanguage, JavaSyntaxKind, Parse, Parser};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
+    Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()
 }
 
 fn fixtures_dir() -> PathBuf {

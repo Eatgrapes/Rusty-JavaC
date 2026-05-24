@@ -1,12 +1,22 @@
+#[path = "expr_gen/arrays.rs"]
 mod arrays;
+#[path = "expr_gen/assign.rs"]
 mod assign;
+#[path = "expr_gen/branch.rs"]
 pub(crate) mod branch;
+#[path = "expr_gen/calls.rs"]
 mod calls;
+#[path = "expr_gen/convert.rs"]
 mod convert;
+#[path = "expr_gen/literals.rs"]
 mod literals;
+#[path = "expr_gen/ops.rs"]
 mod ops;
+#[path = "expr_gen/switch.rs"]
 pub(crate) mod switch;
+#[path = "expr_gen/types.rs"]
 mod types;
+#[path = "expr_gen/values.rs"]
 mod values;
 
 use crate::codegen::CodegenCtx;

@@ -1,3 +1,4 @@
+#[path = "classpath/source.rs"]
 mod source;
 
 use self::source::JavaSource;

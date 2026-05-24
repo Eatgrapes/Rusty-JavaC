@@ -63,13 +63,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
-name = "compiler-example"
-version = "0.1.0"
-dependencies = [
- "javac-compiler",
-]
-
-[[package]]
 name = "countme"
 version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -154,111 +147,6 @@ checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
 dependencies = [
  "equivalent",
  "hashbrown 0.17.1",
-]
-
-[[package]]
-name = "javac-ast"
-version = "0.1.0"
-dependencies = [
- "rowan",
-]
-
-[[package]]
-name = "javac-bytecode"
-version = "0.1.0"
-dependencies = [
- "javac-call-resolver",
- "javac-classfile",
- "javac-hir",
- "javac-ty",
- "rust-asm",
- "thiserror",
- "ustr",
-]
-
-[[package]]
-name = "javac-call-resolver"
-version = "0.1.0"
-dependencies = [
- "javac-ty",
- "rust-asm",
- "ustr",
-]
-
-[[package]]
-name = "javac-classfile"
-version = "0.1.0"
-dependencies = [
- "rust-asm",
- "thiserror",
-]
-
-[[package]]
-name = "javac-compiler"
-version = "0.1.0"
-dependencies = [
- "javac-ast",
- "javac-bytecode",
- "javac-call-resolver",
- "javac-classfile",
- "javac-diagnostics",
- "javac-hir",
- "javac-lexer",
- "javac-parser",
- "javac-ty",
- "rust-asm",
- "text-size",
- "ustr",
- "zip",
-]
-
-[[package]]
-name = "javac-diagnostics"
-version = "0.1.0"
-dependencies = [
- "text-size",
-]
-
-[[package]]
-name = "javac-hir"
-version = "0.1.0"
-dependencies = [
- "javac-ast",
- "javac-call-resolver",
- "javac-ty",
- "la-arena",
- "text-size",
- "thiserror",
- "ustr",
-]
-
-[[package]]
-name = "javac-lexer"
-version = "0.1.0"
-dependencies = [
- "javac-ast",
- "logos",
- "text-size",
-]
-
-[[package]]
-name = "javac-parser"
-version = "0.1.0"
-dependencies = [
- "javac-ast",
- "javac-diagnostics",
- "javac-lexer",
- "rowan",
- "text-size",
-]
-
-[[package]]
-name = "javac-ty"
-version = "0.1.0"
-dependencies = [
- "javac-ast",
- "thiserror",
- "ustr",
 ]
 
 [[package]]
@@ -441,6 +329,20 @@ name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
+
+[[package]]
+name = "rusty-javac"
+version = "0.1.0"
+dependencies = [
+ "la-arena",
+ "logos",
+ "rowan",
+ "rust-asm",
+ "text-size",
+ "thiserror",
+ "ustr",
+ "zip",
+]
 
 [[package]]
 name = "scopeguard"
