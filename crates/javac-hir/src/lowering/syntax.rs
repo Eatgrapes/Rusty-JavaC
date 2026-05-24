@@ -73,8 +73,8 @@ pub(super) fn initializer_tokens(node: &JavaSyntaxNode) -> Option<Vec<ExprToken>
         .descendants_with_tokens()
         .filter_map(|element| element.into_token())
         .filter_map(|token| {
-            if token.kind() == JavaSyntaxKind::Eq {
-                seen_eq = true;
+            if !seen_eq {
+                seen_eq = token.kind() == JavaSyntaxKind::Eq;
                 return None;
             }
             if seen_eq && is_expr_token(token.kind()) {
