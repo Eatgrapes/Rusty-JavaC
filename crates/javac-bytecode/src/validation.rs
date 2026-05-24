@@ -4,7 +4,10 @@ mod diagnostic;
 mod scope;
 
 use crate::error::BytecodeError;
-use diagnostic::{display_internal_name, unresolved_field, unresolved_method, unresolved_variable};
+use diagnostic::{
+    display_internal_name, invalid_this_method_receiver, unresolved_field, unresolved_method,
+    unresolved_variable,
+};
 use javac_call_resolver::ClassCatalog;
 use javac_hir::hir::*;
 use javac_ty::{MethodSig, Ty};
@@ -457,10 +460,7 @@ impl Validator {
         };
         let is_static = sig.access_flags & javac_classfile::ACC_STATIC != 0;
         if is_static && !allow_static {
-            return Err(BytecodeError::new(format!(
-                "non-static method {} cannot be called on this",
-                method
-            )));
+            return Err(invalid_this_method_receiver(method, line));
         }
         Ok(())
     }

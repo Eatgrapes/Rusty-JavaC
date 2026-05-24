@@ -1,6 +1,7 @@
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{message}")]
 pub struct BytecodeError {
+    pub code: &'static str,
     pub message: String,
     pub line: Option<u16>,
     pub needle: Option<String>,
@@ -11,6 +12,7 @@ pub struct BytecodeError {
 impl BytecodeError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
+            code: "B0001",
             message: message.into(),
             line: None,
             needle: None,
@@ -21,12 +23,18 @@ impl BytecodeError {
 
     pub fn at_line(message: impl Into<String>, line: Option<u16>) -> Self {
         Self {
+            code: "B0001",
             message: message.into(),
             line,
             needle: None,
             label: None,
             help: None,
         }
+    }
+
+    pub fn with_code(mut self, code: &'static str) -> Self {
+        self.code = code;
+        self
     }
 
     pub fn with_needle(mut self, needle: impl Into<String>) -> Self {

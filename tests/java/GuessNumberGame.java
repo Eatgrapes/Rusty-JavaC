@@ -1,3 +1,4 @@
+import java.util.Random;
 import java.util.Scanner;
 
 public class GuessNumberGame {
@@ -24,5 +25,9 @@ public class GuessNumberGame {
         if (!guessed) {
             System.out.println("answer was " + secret);
         }
+    }
+
+    static int pickAnswer(Random random) {
+        return random.nextInt(100) + 1;
     }
 }

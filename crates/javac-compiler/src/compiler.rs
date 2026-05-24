@@ -128,7 +128,7 @@ fn render_bytecode_error(filename: &str, source: &str, error: &BytecodeError) ->
 
     let range = line_range(source, line as usize, error.needle.as_deref());
     let mut diagnostic = Diagnostic::error(error.message.clone(), range)
-        .with_code("B0001")
+        .with_code(error.code)
         .with_primary_label(
             error
                 .label
