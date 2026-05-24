@@ -7,6 +7,26 @@ use javac_hir::hir::*;
 use javac_ty::Ty;
 use rust_asm::opcodes;
 
+#[derive(Clone, Copy)]
+enum AssignMode {
+    Value,
+    Effect,
+}
+
+impl AssignMode {
+    fn leaves_value(self) -> bool {
+        matches!(self, Self::Value)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct AssignRequest<'a> {
+    body: &'a Body,
+    op: &'a AssignOp,
+    value: ExprId,
+    mode: AssignMode,
+}
+
 pub(super) fn emit_assign(
     mw: &mut MethodWriter,
     ctx: &mut CodegenCtx,
@@ -15,36 +35,36 @@ pub(super) fn emit_assign(
     op: &AssignOp,
     value: ExprId,
 ) {
-    if let Expr::Ident(name) = &body.exprs[target]
-        && let Some(slot) = ctx.get_local(*name)
-    {
-        emit_local_assign(mw, ctx, body, *name, slot, op, value);
-        return;
+    let request = AssignRequest {
+        body,
+        op,
+        value,
+        mode: AssignMode::Value,
+    };
+    if !emit_known_assign(mw, ctx, target, request) {
+        gen_expr(mw, ctx, body, value);
     }
+}
 
-    if let Expr::Ident(name) = &body.exprs[target]
-        && ctx.field_is_static(*name)
-    {
-        emit_static_field_assign(mw, ctx, body, *name, op, value);
-        return;
-    }
-
-    if let Expr::FieldAccess { target, field } = body.exprs[target].clone()
-        && matches!(op, AssignOp::Plain)
-        && super::values::is_current_instance(body, target)
-    {
-        emit_instance_field_assign(mw, ctx, body, field, value);
-        return;
-    }
-
-    if let Expr::ArrayAccess { array, index } = body.exprs[target].clone()
-        && matches!(op, AssignOp::Plain)
-    {
-        emit_array_assign(mw, ctx, body, array, index, value);
-        return;
-    }
-
-    gen_expr(mw, ctx, body, value);
+pub(super) fn emit_assign_for_effect(
+    mw: &mut MethodWriter,
+    ctx: &mut CodegenCtx,
+    body: &Body,
+    target: ExprId,
+    op: &AssignOp,
+    value: ExprId,
+) -> bool {
+    emit_known_assign(
+        mw,
+        ctx,
+        target,
+        AssignRequest {
+            body,
+            op,
+            value,
+            mode: AssignMode::Effect,
+        },
+    )
 }
 
 pub(super) fn emit_pre_inc_dec(
@@ -118,42 +138,73 @@ pub(super) fn emit_inc_dec_for_effect(
 fn emit_local_assign(
     mw: &mut MethodWriter,
     ctx: &mut CodegenCtx,
-    body: &Body,
+    request: AssignRequest<'_>,
     name: ustr::Ustr,
     slot: u16,
-    op: &AssignOp,
-    value: ExprId,
 ) {
     let ty = ctx.local_ty(name).unwrap_or(Ty::Int);
 
-    if !matches!(op, AssignOp::Plain) {
+    if !matches!(request.op, AssignOp::Plain) {
         mw.visit_var_insn(load_opcode(&ty), slot);
     }
 
-    gen_expr(mw, ctx, body, value);
-    coerce(mw, &expr_ty(ctx, body, value), &ty);
+    gen_expr(mw, ctx, request.body, request.value);
+    coerce(mw, &expr_ty(ctx, request.body, request.value), &ty);
 
-    if !matches!(op, AssignOp::Plain) {
-        super::ops::emit_assign_op(mw, op, &ty);
+    if !matches!(request.op, AssignOp::Plain) {
+        super::ops::emit_assign_op(mw, request.op, &ty);
     }
 
-    dup_ty(mw, &ty);
+    if request.mode.leaves_value() {
+        dup_ty(mw, &ty);
+    }
     mw.visit_var_insn(store_opcode(&ty), slot);
+}
+
+fn emit_known_assign(
+    mw: &mut MethodWriter,
+    ctx: &mut CodegenCtx,
+    target: ExprId,
+    request: AssignRequest<'_>,
+) -> bool {
+    match request.body.exprs[target].clone() {
+        Expr::Ident(name) => {
+            if let Some(slot) = ctx.get_local(name) {
+                emit_local_assign(mw, ctx, request, name, slot);
+                true
+            } else if ctx.field_is_static(name) {
+                emit_static_field_assign(mw, ctx, request, name);
+                true
+            } else {
+                false
+            }
+        }
+        Expr::FieldAccess { target, field }
+            if matches!(request.op, AssignOp::Plain)
+                && super::values::is_current_instance(request.body, target) =>
+        {
+            emit_instance_field_assign(mw, ctx, request, field);
+            true
+        }
+        Expr::ArrayAccess { array, index } if matches!(request.op, AssignOp::Plain) => {
+            emit_array_assign(mw, ctx, request, array, index);
+            true
+        }
+        _ => false,
+    }
 }
 
 fn emit_static_field_assign(
     mw: &mut MethodWriter,
     ctx: &mut CodegenCtx,
-    body: &Body,
+    request: AssignRequest<'_>,
     name: ustr::Ustr,
-    op: &AssignOp,
-    value: ExprId,
 ) {
     let ty = ctx
         .field_ty(name)
-        .unwrap_or_else(|| expr_ty(ctx, body, value));
+        .unwrap_or_else(|| expr_ty(ctx, request.body, request.value));
 
-    if !matches!(op, AssignOp::Plain) {
+    if !matches!(request.op, AssignOp::Plain) {
         mw.visit_field_insn(
             opcodes::GETSTATIC,
             ctx.class_name.as_str(),
@@ -162,14 +213,16 @@ fn emit_static_field_assign(
         );
     }
 
-    gen_expr(mw, ctx, body, value);
-    coerce(mw, &expr_ty(ctx, body, value), &ty);
+    gen_expr(mw, ctx, request.body, request.value);
+    coerce(mw, &expr_ty(ctx, request.body, request.value), &ty);
 
-    if !matches!(op, AssignOp::Plain) {
-        super::ops::emit_assign_op(mw, op, &ty);
+    if !matches!(request.op, AssignOp::Plain) {
+        super::ops::emit_assign_op(mw, request.op, &ty);
     }
 
-    dup_ty(mw, &ty);
+    if request.mode.leaves_value() {
+        dup_ty(mw, &ty);
+    }
     mw.visit_field_insn(
         opcodes::PUTSTATIC,
         ctx.class_name.as_str(),
@@ -252,49 +305,66 @@ fn emit_static_field_inc_dec_for_effect(
 fn emit_instance_field_assign(
     mw: &mut MethodWriter,
     ctx: &mut CodegenCtx,
-    body: &Body,
+    request: AssignRequest<'_>,
     field: ustr::Ustr,
-    value: ExprId,
 ) {
     let ty = ctx
         .field_ty(field)
-        .unwrap_or_else(|| expr_ty(ctx, body, value));
-    let slot = ctx.alloc_temp(&ty);
+        .unwrap_or_else(|| expr_ty(ctx, request.body, request.value));
 
-    gen_expr(mw, ctx, body, value);
-    coerce(mw, &expr_ty(ctx, body, value), &ty);
-    mw.visit_var_insn(store_opcode(&ty), slot);
-
-    mw.visit_var_insn(opcodes::ALOAD, 0);
-    mw.visit_var_insn(load_opcode(&ty), slot);
-    mw.visit_field_insn(
-        opcodes::PUTFIELD,
-        ctx.class_name.as_str(),
-        field.as_str(),
-        &ty.descriptor(),
-    );
-    mw.visit_var_insn(load_opcode(&ty), slot);
+    if request.mode.leaves_value() {
+        let slot = ctx.alloc_temp(&ty);
+        gen_expr(mw, ctx, request.body, request.value);
+        coerce(mw, &expr_ty(ctx, request.body, request.value), &ty);
+        mw.visit_var_insn(store_opcode(&ty), slot);
+        mw.visit_var_insn(opcodes::ALOAD, 0);
+        mw.visit_var_insn(load_opcode(&ty), slot);
+        mw.visit_field_insn(
+            opcodes::PUTFIELD,
+            ctx.class_name.as_str(),
+            field.as_str(),
+            &ty.descriptor(),
+        );
+        mw.visit_var_insn(load_opcode(&ty), slot);
+    } else {
+        mw.visit_var_insn(opcodes::ALOAD, 0);
+        gen_expr(mw, ctx, request.body, request.value);
+        coerce(mw, &expr_ty(ctx, request.body, request.value), &ty);
+        mw.visit_field_insn(
+            opcodes::PUTFIELD,
+            ctx.class_name.as_str(),
+            field.as_str(),
+            &ty.descriptor(),
+        );
+    }
 }
 
 fn emit_array_assign(
     mw: &mut MethodWriter,
     ctx: &mut CodegenCtx,
-    body: &Body,
+    request: AssignRequest<'_>,
     array: ExprId,
     index: ExprId,
-    value: ExprId,
 ) {
-    let element_ty = super::arrays::array_element_type(ctx, body, array);
-    let slot = ctx.alloc_temp(&element_ty);
+    let element_ty = super::arrays::array_element_type(ctx, request.body, array);
 
-    gen_expr(mw, ctx, body, value);
-    coerce(mw, &expr_ty(ctx, body, value), &element_ty);
-    mw.visit_var_insn(store_opcode(&element_ty), slot);
-
-    gen_expr(mw, ctx, body, array);
-    gen_expr(mw, ctx, body, index);
-    coerce(mw, &expr_ty(ctx, body, index), &Ty::Int);
-    mw.visit_var_insn(load_opcode(&element_ty), slot);
-    mw.visit_insn(super::arrays::array_store_opcode(&element_ty));
-    mw.visit_var_insn(load_opcode(&element_ty), slot);
+    if request.mode.leaves_value() {
+        let slot = ctx.alloc_temp(&element_ty);
+        gen_expr(mw, ctx, request.body, request.value);
+        coerce(mw, &expr_ty(ctx, request.body, request.value), &element_ty);
+        mw.visit_var_insn(store_opcode(&element_ty), slot);
+        gen_expr(mw, ctx, request.body, array);
+        gen_expr(mw, ctx, request.body, index);
+        coerce(mw, &expr_ty(ctx, request.body, index), &Ty::Int);
+        mw.visit_var_insn(load_opcode(&element_ty), slot);
+        mw.visit_insn(super::arrays::array_store_opcode(&element_ty));
+        mw.visit_var_insn(load_opcode(&element_ty), slot);
+    } else {
+        gen_expr(mw, ctx, request.body, array);
+        gen_expr(mw, ctx, request.body, index);
+        coerce(mw, &expr_ty(ctx, request.body, index), &Ty::Int);
+        gen_expr(mw, ctx, request.body, request.value);
+        coerce(mw, &expr_ty(ctx, request.body, request.value), &element_ty);
+        mw.visit_insn(super::arrays::array_store_opcode(&element_ty));
+    }
 }

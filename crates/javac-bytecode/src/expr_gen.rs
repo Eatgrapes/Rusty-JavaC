@@ -137,6 +137,8 @@ pub(crate) fn gen_expr_for_effect(
     expr_id: ExprId,
 ) {
     match &body.exprs[expr_id] {
+        Expr::Assign { target, op, value }
+            if assign::emit_assign_for_effect(mw, ctx, body, *target, op, *value) => {}
         Expr::PostInc(target)
         | Expr::Unary {
             op: UnaryOp::PreInc,
