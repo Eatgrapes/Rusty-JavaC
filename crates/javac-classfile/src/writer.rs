@@ -5,6 +5,7 @@ use rust_asm::class_writer::{
 use rust_asm::constant_pool::{ConstantPoolBuilder, CpInfo};
 pub use rust_asm::insn::Label;
 use rust_asm::insn::LabelNode;
+pub use rust_asm::insn::{BootstrapArgument, Handle};
 use std::collections::HashMap;
 
 pub struct ClassFileWriter {
@@ -186,6 +187,17 @@ impl MethodWriter {
     ) {
         self.inner
             .visit_method_insn(opcode, owner, name, descriptor, is_interface);
+    }
+
+    pub fn visit_invoke_dynamic_insn(
+        &mut self,
+        name: &str,
+        descriptor: &str,
+        bootstrap_method: Handle,
+        bootstrap_args: &[BootstrapArgument],
+    ) {
+        self.inner
+            .visit_invokedynamic_insn(name, descriptor, bootstrap_method, bootstrap_args);
     }
 
     pub fn visit_ldc_insn_int(&mut self, value: i32) {

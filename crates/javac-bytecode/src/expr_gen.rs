@@ -23,7 +23,12 @@ use crate::codegen::CodegenCtx;
 use javac_classfile::MethodWriter;
 use javac_hir::hir::*;
 use javac_ty::Ty;
+use rust_asm::insn::{BootstrapArgument, Handle};
 use rust_asm::opcodes;
+
+const LAMBDA_METAFACTORY: &str = "java/lang/invoke/LambdaMetafactory";
+const METAFACTORY_NAME: &str = "metafactory";
+const METAFACTORY_DESC: &str = "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;";
 
 pub(crate) use arrays::array_load_opcode;
 pub(crate) use convert::{cast, coerce, pop_ty, push_default_value};
@@ -116,6 +121,9 @@ pub fn gen_expr(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, expr_i
             gen_expr(mw, ctx, body, *expr);
             mw.visit_type_insn(opcodes::INSTANCEOF, &ty.internal_name());
         }
+        Expr::Lambda { params: _, body: _ } => {
+            emit_lambda(mw, ctx, expr_id);
+        }
         _ => push_default_value(mw, &expr_ty(ctx, body, expr_id)),
     }
 }
@@ -179,4 +187,27 @@ fn emit_ternary(
     gen_expr(mw, ctx, body, else_expr);
     coerce(mw, &expr_ty(ctx, body, else_expr), &result_ty);
     mw.visit_label(end_label);
+}
+
+fn emit_lambda(mw: &mut MethodWriter, ctx: &CodegenCtx, expr_id: ExprId) {
+    let Some(info) = ctx.lambda_info.get(&expr_id) else {
+        mw.visit_insn(opcodes::ACONST_NULL);
+        return;
+    };
+
+    let bsm = Handle {
+        reference_kind: rust_asm::constants::REF_INVOKE_STATIC,
+        owner: LAMBDA_METAFACTORY.to_string(),
+        name: METAFACTORY_NAME.to_string(),
+        descriptor: METAFACTORY_DESC.to_string(),
+        is_interface: false,
+    };
+
+    let args = vec![
+        BootstrapArgument::MethodType(info.sam_method_type.clone()),
+        BootstrapArgument::Handle(info.impl_method_handle.clone()),
+        BootstrapArgument::MethodType(info.impl_descriptor.clone()),
+    ];
+
+    mw.visit_invoke_dynamic_insn(&info.sam_method_name, &info.sam_descriptor, bsm, &args);
 }
