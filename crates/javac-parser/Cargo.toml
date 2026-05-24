@@ -3,10 +3,16 @@ name = "javac-parser"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
-javac-ast = { path = "../javac-ast" }
-javac-lexer = { path = "../javac-lexer" }
-javac-diagnostics = { path = "../javac-diagnostics" }
+javac-ast = { workspace = true }
+javac-lexer = { workspace = true }
+javac-diagnostics = { workspace = true }
 rowan = { workspace = true }
 text-size = { workspace = true }

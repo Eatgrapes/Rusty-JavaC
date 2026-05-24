@@ -3,12 +3,18 @@ name = "javac-bytecode"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
-javac-hir = { path = "../javac-hir" }
-javac-classfile = { path = "../javac-classfile" }
-javac-call-resolver = { path = "../javac-call-resolver" }
-javac-ty = { path = "../javac-ty" }
+javac-hir = { workspace = true }
+javac-classfile = { workspace = true }
+javac-call-resolver = { workspace = true }
+javac-ty = { workspace = true }
 rust-asm = { workspace = true }
 thiserror = { workspace = true }
 ustr = "1.1.0"

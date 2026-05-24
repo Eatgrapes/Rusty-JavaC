@@ -3,11 +3,17 @@ name = "javac-hir"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
-javac-ast = { path = "../javac-ast" }
-javac-call-resolver = { path = "../javac-call-resolver" }
-javac-ty = { path = "../javac-ty" }
+javac-ast = { workspace = true }
+javac-call-resolver = { workspace = true }
+javac-ty = { workspace = true }
 la-arena = "0.3.1"
 thiserror = { workspace = true }
 text-size = { workspace = true }

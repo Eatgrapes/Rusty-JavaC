@@ -3,17 +3,23 @@ name = "javac-compiler"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
-javac-ast = { path = "../javac-ast" }
-javac-lexer = { path = "../javac-lexer" }
-javac-parser = { path = "../javac-parser" }
-javac-hir = { path = "../javac-hir" }
-javac-ty = { path = "../javac-ty" }
-javac-bytecode = { path = "../javac-bytecode" }
-javac-classfile = { path = "../javac-classfile" }
-javac-call-resolver = { path = "../javac-call-resolver" }
-javac-diagnostics = { path = "../javac-diagnostics" }
+javac-ast = { workspace = true }
+javac-lexer = { workspace = true }
+javac-parser = { workspace = true }
+javac-hir = { workspace = true }
+javac-ty = { workspace = true }
+javac-bytecode = { workspace = true }
+javac-classfile = { workspace = true }
+javac-call-resolver = { workspace = true }
+javac-diagnostics = { workspace = true }
 rust-asm = { workspace = true }
 text-size = { workspace = true }
 ustr = "1.1.0"

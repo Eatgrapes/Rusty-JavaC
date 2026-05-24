@@ -33,3 +33,14 @@ rowan = "0.16"
 logos = "0.16"
 
 rust-asm = { version = "0.2", features = ["macros"] }
+
+javac-ast = { version = "0.1.0", path = "crates/javac-ast" }
+javac-bytecode = { version = "0.1.0", path = "crates/javac-bytecode" }
+javac-call-resolver = { version = "0.1.0", path = "crates/javac-call-resolver" }
+javac-classfile = { version = "0.1.0", path = "crates/javac-classfile" }
+javac-compiler = { version = "0.1.0", path = "crates/javac-compiler" }
+javac-diagnostics = { version = "0.1.0", path = "crates/javac-diagnostics" }
+javac-hir = { version = "0.1.0", path = "crates/javac-hir" }
+javac-lexer = { version = "0.1.0", path = "crates/javac-lexer" }
+javac-parser = { version = "0.1.0", path = "crates/javac-parser" }
+javac-ty = { version = "0.1.0", path = "crates/javac-ty" }
