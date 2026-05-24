@@ -67,6 +67,10 @@ impl ClassFileWriter {
         self.class_signature = Some(signature.to_string());
     }
 
+    pub fn visit_source_file(&mut self, name: &str) {
+        self.cw.visit_source_file(name);
+    }
+
     pub fn to_bytes(self) -> Result<Vec<u8>, String> {
         let mut class_node = self.cw.to_class_node().map_err(|e| e.to_string())?;
         add_extra_attributes(

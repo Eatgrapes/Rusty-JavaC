@@ -20,6 +20,14 @@ pub fn gen_class_with_catalog(
     unit: &CompilationUnit,
     catalog: &ClassCatalog,
 ) -> Result<Vec<u8>, BytecodeError> {
+    gen_class_with_source_file(unit, catalog, None)
+}
+
+pub fn gen_class_with_source_file(
+    unit: &CompilationUnit,
+    catalog: &ClassCatalog,
+    source_file: Option<&str>,
+) -> Result<Vec<u8>, BytecodeError> {
     let type_decl = unit
         .type_decls
         .first()
@@ -27,6 +35,9 @@ pub fn gen_class_with_catalog(
     crate::validation::validate_type_decl(type_decl, catalog)?;
 
     let mut writer = ClassFileWriter::new();
+    if let Some(source_file) = source_file {
+        writer.visit_source_file(source_file);
+    }
     gen_type_decl(&mut writer, type_decl, catalog);
     writer.to_bytes().map_err(BytecodeError::new)
 }

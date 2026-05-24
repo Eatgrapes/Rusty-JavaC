@@ -59,13 +59,23 @@ fn compile_source(
 ) -> CompileResult<ClassArtifact> {
     let unit = parse_and_lower(filename, source, catalog)?;
     let internal_name = top_level_class_name(filename, &unit)?;
-    let bytes = javac_bytecode::class_gen::gen_class_with_catalog(&unit, catalog)
-        .map_err(|e| render_bytecode_error(filename, source, &e))?;
+    let source_file = source_file_attribute_name(filename);
+    let bytes =
+        javac_bytecode::class_gen::gen_class_with_source_file(&unit, catalog, Some(&source_file))
+            .map_err(|e| render_bytecode_error(filename, source, &e))?;
 
     Ok(ClassArtifact {
         internal_name,
         bytes,
     })
+}
+
+fn source_file_attribute_name(filename: &str) -> String {
+    Path::new(filename)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(filename)
+        .to_string()
 }
 
 fn parse_and_lower(
