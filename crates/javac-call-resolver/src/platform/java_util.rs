@@ -83,6 +83,11 @@ pub const METHODS: &[Method] = &[
         "orElse",
         "(Ljava/lang/Object;)Ljava/lang/Object;",
     ),
+    public_instance_method("java/util/Scanner", "hasNext", "()Z"),
+    public_instance_method("java/util/Scanner", "hasNextInt", "()Z"),
+    public_instance_method("java/util/Scanner", "next", "()Ljava/lang/String;"),
+    public_instance_method("java/util/Scanner", "nextInt", "()I"),
+    public_instance_method("java/util/Scanner", "close", "()V"),
 ];
 
 pub const PARENTS: &[Parent] = &[
