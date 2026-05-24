@@ -69,28 +69,25 @@ fn gen_type_decl(writer: &mut ClassFileWriter, type_decl: &TypeDecl, catalog: &C
         gen_default_constructor(writer, type_decl, &super_name, catalog);
     }
 
-    let mut lambda_infos: HashMap<ExprId, LambdaInfo> = HashMap::new();
     let mut counter = 0u32;
     for method in &type_decl.methods {
+        let mut method_lambda_infos: HashMap<ExprId, LambdaInfo> = HashMap::new();
         scan_and_gen_lambdas(
             writer,
             type_decl,
             &super_name,
             catalog,
             method,
-            &mut lambda_infos,
+            &mut method_lambda_infos,
             &mut counter,
         );
-    }
-
-    for method in &type_decl.methods {
         gen_method(
             writer,
             type_decl,
             method,
             &super_name,
             catalog,
-            &lambda_infos,
+            &method_lambda_infos,
         );
     }
 }
@@ -240,11 +237,8 @@ fn scan_and_gen_lambdas(
                         let body_ty = expr_gen::expr_ty(&ctx, &method.body, *body_expr_id);
                         mw.visit_insn(return_opcode(&body_ty));
                     }
-                    LambdaBody::Block(_block) => {
-                        if sam_info.return_ty != Ty::Void {
-                            mw.visit_insn(opcodes::ACONST_NULL);
-                        }
-                        mw.visit_insn(return_opcode(&sam_info.return_ty));
+                    LambdaBody::Block(block) => {
+                        crate::method_gen::gen_method_body(&mut mw, &mut ctx, &method.body, block);
                     }
                 }
 
