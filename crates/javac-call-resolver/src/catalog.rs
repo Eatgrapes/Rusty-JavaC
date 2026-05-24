@@ -184,6 +184,31 @@ impl ClassCatalog {
         }
     }
 
+    pub fn is_interface(&self, internal_name: &str) -> bool {
+        self.interfaces.contains(internal_name)
+    }
+
+    pub fn functional_interface_method(&self, internal_name: &str) -> Option<MethodRef> {
+        if !self.interfaces.contains(internal_name) {
+            return None;
+        }
+
+        let mut sam: Option<MethodRef> = None;
+        for ((owner, _), methods) in &self.methods {
+            if owner == internal_name {
+                for m in methods {
+                    if m.is_interface {
+                        if sam.is_some() {
+                            return None;
+                        }
+                        sam = Some(m.clone());
+                    }
+                }
+            }
+        }
+        sam
+    }
+
     pub fn resolve_static_field(&self, owner: &str, name: &str) -> Option<FieldRef> {
         self.lookup_order(owner).into_iter().find_map(|owner| {
             self.fields
