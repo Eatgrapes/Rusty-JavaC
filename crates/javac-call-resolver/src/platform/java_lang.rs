@@ -45,6 +45,7 @@ pub const METHODS: &[Method] = &[
     public_instance_method("java/lang/Object", "hashCode", "()I"),
     public_instance_method("java/lang/Object", "equals", "(Ljava/lang/Object;)Z"),
     public_instance_method("java/lang/Object", "toString", "()Ljava/lang/String;"),
+    public_instance_method("java/lang/Throwable", "getMessage", "()Ljava/lang/String;"),
     public_instance_method("java/lang/String", "equals", "(Ljava/lang/Object;)Z"),
     public_instance_method(
         "java/lang/String",
