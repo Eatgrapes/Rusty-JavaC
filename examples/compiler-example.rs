@@ -1,5 +1,4 @@
-use rusty_javac::config::CompilerConfig;
-use rusty_javac::pipeline::compile;
+use rusty_javac::{CompilerConfig, compile};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();

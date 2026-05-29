@@ -1,5 +1,6 @@
 use rowan::SyntaxNode;
-use rusty_javac::{JavaLanguage, JavaSyntaxKind, Parse, Parser};
+use rusty_javac::ast::{JavaLanguage, JavaSyntaxKind};
+use rusty_javac::parser::{Parse, Parser};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
