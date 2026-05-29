@@ -1,5 +1,6 @@
 mod classpath;
 pub mod config;
+mod diagnostic;
 pub mod driver;
 mod incremental;
 pub mod pipeline;

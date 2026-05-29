@@ -113,9 +113,7 @@ pub(crate) fn is_cast(p: &Parser) -> bool {
         return false;
     }
     la.advance();
-    while la.pos < la.tokens.len() && matches!(la.tokens[la.pos].kind, Whitespace | Comment) {
-        la.pos += 1;
-    }
+    la.skip_trivia();
     !la.at(Arrow)
 }
 
