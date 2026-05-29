@@ -9,23 +9,29 @@ use crate::lowering::{LowerError, LowerResult};
 use javac_ast::ast::{AstNode, ClassBody, FieldDecl as AstFieldDecl, MethodDecl as AstMethodDecl};
 use javac_ast::{JavaSyntaxKind, JavaSyntaxNode};
 use javac_ty::{MethodSig, Ty};
+use std::cell::Cell;
 use std::collections::HashSet;
+use std::rc::Rc;
 use ustr::Ustr;
 
 #[derive(Default)]
 pub(super) struct ClassMembers {
     pub fields: Vec<FieldDecl>,
     pub methods: Vec<MethodDecl>,
+    pub inner_types: Vec<Rc<TypeDecl>>,
 }
 
 pub(super) fn lower_class_members(
     body: ClassBody,
     class_type_params: &[javac_ty::TypeParam],
     resolver: &TypeResolver,
+    enclosing_static_owner: Option<Ustr>,
 ) -> LowerResult<ClassMembers> {
     let mut pending_flags = 0;
     let mut fields = Vec::new();
     let mut methods = Vec::new();
+    let mut inner_types = Vec::new();
+    let anonymous_counter = Rc::new(Cell::new(0));
     let type_vars = type_var_set(class_type_params, &[]);
 
     for child in body.syntax().children() {
@@ -33,25 +39,39 @@ pub(super) fn lower_class_members(
             JavaSyntaxKind::ModifierList => pending_flags = access_flags(&child),
             JavaSyntaxKind::FieldDecl => {
                 let field = AstFieldDecl::cast(child).ok_or(LowerError::UnsupportedClassMember)?;
-                fields.extend(lower_field_decl(
+                let mut lowered = lower_field_decl(
                     field,
                     pending_flags,
                     fields.len() as u32,
                     &type_vars,
                     resolver,
-                )?);
+                    BodyLoweringContext {
+                        anonymous_counter: anonymous_counter.clone(),
+                        enclosing_static_owner,
+                        outer_fields: captured_fields(&fields),
+                    },
+                )?;
+                inner_types.append(&mut lowered.inner_types);
+                fields.append(&mut lowered.fields);
                 pending_flags = 0;
             }
             JavaSyntaxKind::MethodDecl => {
                 let method =
                     AstMethodDecl::cast(child).ok_or(LowerError::UnsupportedClassMember)?;
-                methods.push(lower_method_decl(
+                let mut lowered = lower_method_decl(
                     method,
                     pending_flags,
                     methods.len() as u32,
                     class_type_params,
                     resolver,
-                )?);
+                    BodyLoweringContext {
+                        anonymous_counter: anonymous_counter.clone(),
+                        enclosing_static_owner,
+                        outer_fields: captured_fields(&fields),
+                    },
+                )?;
+                inner_types.append(&mut lowered.inner_types);
+                methods.push(lowered.method);
                 pending_flags = 0;
             }
             JavaSyntaxKind::ConstructorDecl => {
@@ -72,7 +92,27 @@ pub(super) fn lower_class_members(
         }
     }
 
-    Ok(ClassMembers { fields, methods })
+    Ok(ClassMembers {
+        fields,
+        methods,
+        inner_types,
+    })
+}
+
+struct LoweredFields {
+    fields: Vec<FieldDecl>,
+    inner_types: Vec<Rc<TypeDecl>>,
+}
+
+struct LoweredMethod {
+    method: MethodDecl,
+    inner_types: Vec<Rc<TypeDecl>>,
+}
+
+struct BodyLoweringContext {
+    anonymous_counter: Rc<Cell<u32>>,
+    enclosing_static_owner: Option<Ustr>,
+    outer_fields: Vec<CapturedField>,
 }
 
 fn lower_field_decl(
@@ -81,22 +121,27 @@ fn lower_field_decl(
     first_field_index: u32,
     type_vars: &HashSet<Ustr>,
     resolver: &TypeResolver,
-) -> LowerResult<Vec<FieldDecl>> {
+    body_context: BodyLoweringContext,
+) -> LowerResult<LoweredFields> {
     let declared_ty = field.ty().ok_or(LowerError::MissingType)?;
     let ty = lower_type_with_vars(declared_ty.syntax(), type_vars, resolver)?;
     let mut fields = Vec::new();
+    let mut inner_types = Vec::new();
 
-    for declarator in field
-        .syntax()
-        .descendants()
-        .filter(|node| node.kind() == JavaSyntaxKind::VarDeclarator)
-    {
+    for declarator in var_declarators(field.syntax()) {
         let name = first_ident(&declarator).ok_or(LowerError::MissingMethodName)?;
-        let mut body_builder = BodyBuilder::new(resolver.clone());
+        let mut body_builder = BodyBuilder::with_anonymous_context(
+            resolver.clone(),
+            body_context.anonymous_counter.clone(),
+            access_flags & javac_classfile::ACC_STATIC == 0,
+            body_context.enclosing_static_owner,
+            body_context.outer_fields.clone(),
+        );
         let initializer = initializer_tokens(&declarator)
             .map(|tokens| body_builder.lower_expr_tokens(&tokens))
             .transpose()?
             .flatten();
+        inner_types.extend(body_builder.take_anonymous_types());
 
         fields.push(FieldDecl {
             id: HirId(first_field_index + fields.len() as u32 + 1),
@@ -109,7 +154,23 @@ fn lower_field_decl(
         });
     }
 
-    Ok(fields)
+    Ok(LoweredFields {
+        fields,
+        inner_types,
+    })
+}
+
+fn var_declarators(field: &JavaSyntaxNode) -> Vec<JavaSyntaxNode> {
+    field
+        .children()
+        .find(|node| node.kind() == JavaSyntaxKind::VarDeclaratorList)
+        .into_iter()
+        .flat_map(|list| {
+            list.children()
+                .filter(|node| node.kind() == JavaSyntaxKind::VarDeclarator)
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 fn lower_constructor_decl(
@@ -150,6 +211,7 @@ fn lower_constructor_decl(
         throws,
         body: body_builder.body,
         root_block,
+        constructor_call: None,
     })
 }
 
@@ -159,7 +221,8 @@ fn lower_method_decl(
     method_index: u32,
     class_type_params: &[javac_ty::TypeParam],
     resolver: &TypeResolver,
-) -> LowerResult<MethodDecl> {
+    body_context: BodyLoweringContext,
+) -> LowerResult<LoweredMethod> {
     let name = method.name().ok_or(LowerError::MissingMethodName)?;
     let method_type_params = lower_type_params(method.syntax(), resolver)?;
     let type_vars = type_var_set(class_type_params, &method_type_params);
@@ -182,24 +245,46 @@ fn lower_method_decl(
         return_type,
     );
     signature.type_params = method_type_params;
-    let mut body_builder = BodyBuilder::new(resolver.clone());
+    let mut body_builder = BodyBuilder::with_anonymous_context(
+        resolver.clone(),
+        body_context.anonymous_counter,
+        access_flags & javac_classfile::ACC_STATIC == 0,
+        body_context.enclosing_static_owner,
+        body_context.outer_fields,
+    );
     define_params(&mut body_builder, &params);
     let root_block = lower_method_body(access_flags, &method, &mut body_builder)?;
     let ret_ty = signature.return_type.clone();
     body_builder.resolve_lambda_target_types(&ret_ty);
+    let inner_types = body_builder.take_anonymous_types();
 
-    Ok(MethodDecl {
-        id: HirId(method_index + 1),
-        name: Ustr::from(name.text()),
-        params,
-        signature,
-        access_flags,
-        source_line: Some(source_line(method.syntax())),
-        generic_signature,
-        throws,
-        body: body_builder.body,
-        root_block,
+    Ok(LoweredMethod {
+        method: MethodDecl {
+            id: HirId(method_index + 1),
+            name: Ustr::from(name.text()),
+            params,
+            signature,
+            access_flags,
+            source_line: Some(source_line(method.syntax())),
+            generic_signature,
+            throws,
+            body: body_builder.body,
+            root_block,
+            constructor_call: None,
+        },
+        inner_types,
     })
+}
+
+fn captured_fields(fields: &[FieldDecl]) -> Vec<CapturedField> {
+    fields
+        .iter()
+        .map(|field| CapturedField {
+            name: field.name,
+            ty: field.ty.clone(),
+            access_flags: field.access_flags,
+        })
+        .collect()
 }
 
 fn lower_method_params(

@@ -71,10 +71,7 @@ fn lower_local_var_decl(decl: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerR
     };
     let mut stmts = Vec::new();
 
-    for declarator in decl
-        .descendants()
-        .filter(|node| node.kind() == JavaSyntaxKind::VarDeclarator)
-    {
+    for declarator in var_declarators(decl) {
         let name = first_ident(&declarator).ok_or(LowerError::MissingMethodName)?;
         let initializer = if let Some(tokens) = initializer_tokens(&declarator) {
             body.lower_expr_tokens(&tokens)?
@@ -100,6 +97,18 @@ fn lower_local_var_decl(decl: &JavaSyntaxNode, body: &mut BodyBuilder) -> LowerR
     }
 
     Ok(stmts)
+}
+
+fn var_declarators(decl: &JavaSyntaxNode) -> Vec<JavaSyntaxNode> {
+    decl.children()
+        .find(|node| node.kind() == JavaSyntaxKind::VarDeclaratorList)
+        .into_iter()
+        .flat_map(|list| {
+            list.children()
+                .filter(|node| node.kind() == JavaSyntaxKind::VarDeclarator)
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 fn local_var_type(

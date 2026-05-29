@@ -56,7 +56,33 @@ pub const METHODS: &[Method] = &[
     public_instance_method("java/lang/String", "isEmpty", "()Z"),
     public_instance_method("java/lang/String", "length", "()I"),
     public_instance_method("java/lang/String", "charAt", "(I)C"),
+    public_instance_method("java/lang/String", "toCharArray", "()[C"),
     public_instance_method("java/lang/String", "toString", "()Ljava/lang/String;"),
+    public_instance_method(
+        "java/lang/StringBuilder",
+        "append",
+        "(C)Ljava/lang/StringBuilder;",
+    ),
+    public_instance_method(
+        "java/lang/StringBuilder",
+        "append",
+        "(I)Ljava/lang/StringBuilder;",
+    ),
+    public_instance_method(
+        "java/lang/StringBuilder",
+        "append",
+        "(Ljava/lang/String;)Ljava/lang/StringBuilder;",
+    ),
+    public_instance_method(
+        "java/lang/StringBuilder",
+        "append",
+        "(Ljava/lang/Object;)Ljava/lang/StringBuilder;",
+    ),
+    public_instance_method(
+        "java/lang/StringBuilder",
+        "toString",
+        "()Ljava/lang/String;",
+    ),
     public_instance_method("java/lang/Throwable", "printStackTrace", "()V"),
 ];
 

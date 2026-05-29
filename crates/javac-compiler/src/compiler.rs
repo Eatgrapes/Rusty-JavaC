@@ -62,8 +62,10 @@ impl Compiler {
             return Ok(());
         }
 
-        let artifact = compile_plan(source_file, &source, catalog, plan)?;
-        write_class_file(&self.config.output_dir, &artifact)?;
+        let artifacts = compile_plan(source_file, &source, catalog, plan)?;
+        for artifact in artifacts {
+            write_class_file(&self.config.output_dir, &artifact)?;
+        }
         Ok(())
     }
 }
@@ -89,18 +91,21 @@ fn compile_plan(
     source: &str,
     catalog: &ClassCatalog,
     plan: ClassPlan,
-) -> CompileResult<ClassArtifact> {
-    let bytes = javac_bytecode::class_gen::gen_class_with_source_file(
+) -> CompileResult<Vec<ClassArtifact>> {
+    let classes = javac_bytecode::class_gen::gen_classes_with_source_file(
         &plan.unit,
         catalog,
         Some(&plan.source_file),
     )
     .map_err(|e| render_bytecode_error(filename, source, &e))?;
 
-    Ok(ClassArtifact {
-        internal_name: plan.internal_name,
-        bytes,
-    })
+    Ok(classes
+        .into_iter()
+        .map(|class| ClassArtifact {
+            internal_name: class.internal_name,
+            bytes: class.bytes,
+        })
+        .collect())
 }
 
 fn source_file_attribute_name(filename: &str) -> String {
@@ -160,6 +165,14 @@ fn lower_error_range(source: &str, error: &LowerError) -> TextRange {
             line_range(source, *line as usize, Some(name.as_str()))
         }
         LowerError::VarRequiresInitializer { line } => line_range(source, *line as usize, None),
+        LowerError::UnsupportedExpressionAt {
+            line,
+            range: Some(range),
+        } => validated_range(source, *range)
+            .unwrap_or_else(|| line_range(source, *line as usize, None)),
+        LowerError::UnsupportedExpressionAt { line, range: None } => {
+            line_range(source, *line as usize, None)
+        }
         _ => source_start_range(source),
     }
 }
@@ -256,7 +269,9 @@ fn line_byte_bounds(source: &str, target_line: usize) -> (usize, usize) {
 fn lower_error_label(error: &LowerError) -> &'static str {
     match error {
         LowerError::ExpectedSingleTopLevelClass => "missing class declaration",
-        LowerError::UnsupportedExpression => "unsupported expression here",
+        LowerError::UnsupportedExpression | LowerError::UnsupportedExpressionAt { .. } => {
+            "unsupported expression here"
+        }
         LowerError::PatternVariableOutOfScope(_) => "pattern variable is not in scope",
         LowerError::MissingClassName => "class name is missing",
         LowerError::MissingMethodName => "name is missing",
@@ -274,7 +289,7 @@ fn lower_error_label(error: &LowerError) -> &'static str {
 fn lower_error_help(error: &LowerError) -> &'static str {
     match error {
         LowerError::ExpectedSingleTopLevelClass => "add one top-level class declaration",
-        LowerError::UnsupportedExpression => {
+        LowerError::UnsupportedExpression | LowerError::UnsupportedExpressionAt { .. } => {
             "simplify the expression or add compiler support for it"
         }
         LowerError::PatternVariableOutOfScope(_) => {

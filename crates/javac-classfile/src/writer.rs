@@ -11,6 +11,8 @@ use std::collections::HashMap;
 pub struct ClassFileWriter {
     cw: AsmClassWriter,
     class_signature: Option<String>,
+    nest_host: Option<String>,
+    nest_members: Vec<String>,
     method_metadata: Vec<MethodMetadata>,
     field_metadata: Vec<FieldMetadata>,
 }
@@ -20,6 +22,8 @@ impl ClassFileWriter {
         Self {
             cw: AsmClassWriter::new(COMPUTE_FRAMES | COMPUTE_MAXS),
             class_signature: None,
+            nest_host: None,
+            nest_members: Vec::new(),
             method_metadata: Vec::new(),
             field_metadata: Vec::new(),
         }
@@ -72,11 +76,21 @@ impl ClassFileWriter {
         self.cw.visit_source_file(name);
     }
 
+    pub fn visit_nest_host(&mut self, host: &str) {
+        self.nest_host = Some(host.to_string());
+    }
+
+    pub fn visit_nest_member(&mut self, member: &str) {
+        self.nest_members.push(member.to_string());
+    }
+
     pub fn to_bytes(self) -> Result<Vec<u8>, String> {
         let mut class_node = self.cw.to_class_node().map_err(|e| e.to_string())?;
         add_extra_attributes(
             &mut class_node,
             self.class_signature.as_deref(),
+            self.nest_host.as_deref(),
+            &self.nest_members,
             &self.field_metadata,
             &self.method_metadata,
         );
@@ -300,6 +314,8 @@ struct FieldMetadata {
 fn add_extra_attributes(
     class_node: &mut rust_asm::nodes::ClassNode,
     class_signature: Option<&str>,
+    nest_host: Option<&str>,
+    nest_members: &[String],
     field_metadata: &[FieldMetadata],
     method_metadata: &[MethodMetadata],
 ) {
@@ -320,6 +336,12 @@ fn add_extra_attributes(
     {
         cp.utf8("Exceptions");
     }
+    if nest_host.is_some() {
+        cp.utf8("NestHost");
+    }
+    if !nest_members.is_empty() {
+        cp.utf8("NestMembers");
+    }
     for metadata in field_metadata {
         cp.utf8(&metadata.name);
         cp.utf8(&metadata.descriptor);
@@ -331,6 +353,12 @@ fn add_extra_attributes(
 
     if let Some(signature) = class_signature {
         add_signature_attribute(&mut class_node.attributes, &mut cp, signature);
+    }
+    if let Some(host) = nest_host {
+        add_nest_host_attribute(&mut class_node.attributes, &mut cp, host);
+    }
+    if !nest_members.is_empty() {
+        add_nest_members_attribute(&mut class_node.attributes, &mut cp, nest_members);
     }
 
     for (field, metadata) in class_node.fields.iter_mut().zip(field_metadata) {
@@ -358,6 +386,38 @@ fn add_extra_attributes(
     }
 
     class_node.constant_pool = cp.into_pool();
+}
+
+fn add_nest_host_attribute(
+    attributes: &mut Vec<AttributeInfo>,
+    cp: &mut ConstantPoolBuilder,
+    host: &str,
+) {
+    attributes
+        .retain(|attr| !matches!(attr, AttributeInfo::Unknown { name, .. } if name == "NestHost"));
+    attributes.push(AttributeInfo::Unknown {
+        name: "NestHost".to_string(),
+        info: cp.class(host).to_be_bytes().to_vec(),
+    });
+}
+
+fn add_nest_members_attribute(
+    attributes: &mut Vec<AttributeInfo>,
+    cp: &mut ConstantPoolBuilder,
+    members: &[String],
+) {
+    attributes.retain(
+        |attr| !matches!(attr, AttributeInfo::Unknown { name, .. } if name == "NestMembers"),
+    );
+    let mut info = Vec::new();
+    info.extend_from_slice(&(members.len() as u16).to_be_bytes());
+    for member in members {
+        info.extend_from_slice(&cp.class(member).to_be_bytes());
+    }
+    attributes.push(AttributeInfo::Unknown {
+        name: "NestMembers".to_string(),
+        info,
+    });
 }
 
 fn add_signature_attribute(

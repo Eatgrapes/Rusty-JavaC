@@ -6,13 +6,19 @@ use text_size::TextRange;
 pub(super) struct ExprToken {
     pub kind: JavaSyntaxKind,
     pub text: String,
+    pub line: u16,
+    pub range: TextRange,
 }
 
 impl From<JavaSyntaxToken> for ExprToken {
     fn from(token: JavaSyntaxToken) -> Self {
+        let line = token_source_line(&token);
+        let range = token.text_range();
         Self {
             kind: token.kind(),
             text: token.text().to_string(),
+            line,
+            range,
         }
     }
 }
@@ -77,7 +83,7 @@ pub(super) fn initializer_tokens(node: &JavaSyntaxNode) -> Option<Vec<ExprToken>
                 seen_eq = token.kind() == JavaSyntaxKind::Eq;
                 return None;
             }
-            if seen_eq && is_expr_token(token.kind()) {
+            if seen_eq && is_expr_token(&token) {
                 Some(ExprToken::from(token))
             } else {
                 None
@@ -95,7 +101,7 @@ pub(super) fn initializer_tokens(node: &JavaSyntaxNode) -> Option<Vec<ExprToken>
 pub(super) fn expr_tokens(node: &JavaSyntaxNode) -> Vec<ExprToken> {
     node.descendants_with_tokens()
         .filter_map(|element| element.into_token())
-        .filter(|token| is_expr_token(token.kind()))
+        .filter(is_expr_token)
         .map(ExprToken::from)
         .collect()
 }
@@ -113,7 +119,7 @@ pub(super) fn tokens_in_first_parens(node: &JavaSyntaxNode) -> LowerResult<Vec<E
             JavaSyntaxKind::LParen => {
                 seen_open = true;
                 depth += 1;
-                if depth > 1 && is_expr_token(token.kind()) {
+                if depth > 1 && is_expr_token(&token) {
                     tokens.push(ExprToken::from(token));
                 }
             }
@@ -122,11 +128,11 @@ pub(super) fn tokens_in_first_parens(node: &JavaSyntaxNode) -> LowerResult<Vec<E
                 if depth == 0 {
                     return Ok(tokens);
                 }
-                if is_expr_token(token.kind()) {
+                if is_expr_token(&token) {
                     tokens.push(ExprToken::from(token));
                 }
             }
-            _ if seen_open && depth > 0 && is_expr_token(token.kind()) => {
+            _ if seen_open && depth > 0 && is_expr_token(&token) => {
                 tokens.push(ExprToken::from(token));
             }
             _ => {}
@@ -152,10 +158,10 @@ pub(super) fn tokens_after_keyword(
             continue;
         }
         if seen_keyword {
-            if token.kind() == JavaSyntaxKind::Semi {
+            if token.kind() == JavaSyntaxKind::Semi && !is_inside_anonymous_class_body(&token) {
                 break;
             }
-            if is_expr_token(token.kind()) {
+            if is_expr_token(&token) {
                 tokens.push(ExprToken::from(token));
             }
         }
@@ -175,7 +181,7 @@ pub(super) fn case_pattern_tokens(label: &JavaSyntaxNode) -> Vec<ExprToken> {
         match token.kind() {
             JavaSyntaxKind::CaseKw => in_pattern = true,
             JavaSyntaxKind::Arrow | JavaSyntaxKind::Colon if in_pattern => break,
-            _ if in_pattern && is_expr_token(token.kind()) => tokens.push(ExprToken::from(token)),
+            _ if in_pattern && is_expr_token(&token) => tokens.push(ExprToken::from(token)),
             _ => {}
         }
     }
@@ -210,9 +216,24 @@ pub(super) fn qualified_name_text_range(node: &JavaSyntaxNode) -> LowerResult<(S
     }
 }
 
-fn is_expr_token(kind: JavaSyntaxKind) -> bool {
-    !matches!(
-        kind,
-        JavaSyntaxKind::Semi | JavaSyntaxKind::Whitespace | JavaSyntaxKind::Comment
-    )
+fn is_expr_token(token: &JavaSyntaxToken) -> bool {
+    if matches!(
+        token.kind(),
+        JavaSyntaxKind::Whitespace | JavaSyntaxKind::Comment
+    ) {
+        return false;
+    }
+    token.kind() != JavaSyntaxKind::Semi || is_inside_anonymous_class_body(token)
+}
+
+fn is_inside_anonymous_class_body(token: &JavaSyntaxToken) -> bool {
+    token.parent().is_some_and(|parent| {
+        parent
+            .ancestors()
+            .filter(|node| node.kind() == JavaSyntaxKind::ClassBody)
+            .any(|body| {
+                body.ancestors()
+                    .any(|ancestor| ancestor.kind() == JavaSyntaxKind::NewExpr)
+            })
+    })
 }

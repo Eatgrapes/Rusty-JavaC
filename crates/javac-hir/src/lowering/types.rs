@@ -12,6 +12,7 @@ pub(super) struct TypeResolver {
     exact_imports: HashMap<String, String>,
     wildcard_imports: Vec<String>,
     current_class: Option<String>,
+    super_class: Option<String>,
     catalog: ClassCatalog,
 }
 
@@ -26,6 +27,7 @@ impl TypeResolver {
             exact_imports: HashMap::new(),
             wildcard_imports: Vec::new(),
             current_class: Some(current_class.to_string()),
+            super_class: Some("java/lang/Object".to_string()),
             catalog: catalog.clone(),
         };
 
@@ -41,6 +43,13 @@ impl TypeResolver {
         Ok(resolver)
     }
 
+    pub fn for_anonymous_class(&self, current_class: &str, super_class: &str) -> Self {
+        let mut resolver = self.clone();
+        resolver.current_class = Some(current_class.to_string());
+        resolver.super_class = Some(super_class.to_string());
+        resolver
+    }
+
     pub fn resolve_type_name(
         &self,
         name: &str,
@@ -51,7 +60,7 @@ impl TypeResolver {
             return Ok(Ty::TypeVar(Ustr::from(name)));
         }
 
-        if let Some(current_class) = self.current_class_name(name) {
+        if let Some(current_class) = self.current_class_match(name) {
             return Ok(Ty::Class(Ustr::from(current_class)));
         }
 
@@ -89,6 +98,21 @@ impl TypeResolver {
         self.catalog.resolve_instance_method(receiver, name, args)
     }
 
+    pub fn resolve_constructor(
+        &self,
+        owner: &Ty,
+        args: &[Ty],
+    ) -> Option<javac_call_resolver::MethodRef> {
+        let Ty::Class(owner) = owner.erasure() else {
+            return None;
+        };
+        self.catalog.resolve_constructor(owner.as_str(), args)
+    }
+
+    pub fn is_interface(&self, internal_name: &str) -> bool {
+        self.catalog.is_interface(internal_name)
+    }
+
     pub fn resolve_static_field(
         &self,
         owner: &str,
@@ -111,8 +135,19 @@ impl TypeResolver {
             .unwrap_or_else(Ty::object)
     }
 
+    pub fn current_class_name(&self) -> Option<&str> {
+        self.current_class.as_deref()
+    }
+
+    pub fn current_super_ty(&self) -> Ty {
+        self.super_class
+            .as_deref()
+            .map(Ty::class)
+            .unwrap_or_else(Ty::object)
+    }
+
     pub fn resolve_class_reference(&self, name: &str) -> Option<String> {
-        if let Some(current_class) = self.current_class_name(name) {
+        if let Some(current_class) = self.current_class_match(name) {
             return Some(current_class.to_string());
         }
 
@@ -165,7 +200,7 @@ impl TypeResolver {
         Ok(())
     }
 
-    fn current_class_name(&self, name: &str) -> Option<&str> {
+    fn current_class_match(&self, name: &str) -> Option<&str> {
         let current_class = self.current_class.as_deref()?;
         let simple_name = current_class.rsplit('/').next().unwrap_or(current_class);
         (name == simple_name).then_some(current_class)

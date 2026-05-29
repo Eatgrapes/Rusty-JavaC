@@ -12,6 +12,11 @@ const OBJECT_CLASS: &str = "java/lang/Object";
 const INIT_METHOD: &str = "<init>";
 const CLINIT_METHOD: &str = "<clinit>";
 
+pub struct GeneratedClass {
+    pub internal_name: String,
+    pub bytes: Vec<u8>,
+}
+
 pub fn gen_class(unit: &CompilationUnit) -> Result<Vec<u8>, BytecodeError> {
     let catalog = ClassCatalog::platform();
     gen_class_with_catalog(unit, &catalog)
@@ -29,18 +34,87 @@ pub fn gen_class_with_source_file(
     catalog: &ClassCatalog,
     source_file: Option<&str>,
 ) -> Result<Vec<u8>, BytecodeError> {
+    gen_classes_with_source_file(unit, catalog, source_file)?
+        .into_iter()
+        .next()
+        .map(|class| class.bytes)
+        .ok_or_else(|| BytecodeError::new("no type declarations"))
+}
+
+pub fn gen_classes_with_source_file(
+    unit: &CompilationUnit,
+    catalog: &ClassCatalog,
+    source_file: Option<&str>,
+) -> Result<Vec<GeneratedClass>, BytecodeError> {
     let type_decl = unit
         .type_decls
         .first()
         .ok_or_else(|| BytecodeError::new("no type declarations"))?;
-    crate::validation::validate_type_decl(type_decl, catalog)?;
+    let mut classes = Vec::new();
+    let nest_members = nested_type_names(type_decl);
+    gen_type_decl_class(
+        type_decl,
+        catalog,
+        source_file,
+        None,
+        &nest_members,
+        type_decl.name.as_str(),
+        &mut classes,
+    )?;
+    Ok(classes)
+}
 
+fn gen_type_decl_class(
+    type_decl: &TypeDecl,
+    catalog: &ClassCatalog,
+    source_file: Option<&str>,
+    nest_host: Option<&str>,
+    nest_members: &[String],
+    root_nest_host: &str,
+    classes: &mut Vec<GeneratedClass>,
+) -> Result<(), BytecodeError> {
+    crate::validation::validate_type_decl(type_decl, catalog)?;
     let mut writer = ClassFileWriter::new();
     if let Some(source_file) = source_file {
         writer.visit_source_file(source_file);
     }
+    if let Some(host) = nest_host {
+        writer.visit_nest_host(host);
+    } else {
+        for member in nest_members {
+            writer.visit_nest_member(member);
+        }
+    }
     gen_type_decl(&mut writer, type_decl, catalog);
-    writer.to_bytes().map_err(BytecodeError::new)
+    classes.push(GeneratedClass {
+        internal_name: type_decl.name.to_string(),
+        bytes: writer.to_bytes().map_err(BytecodeError::new)?,
+    });
+    for inner in &type_decl.inner_types {
+        gen_type_decl_class(
+            inner,
+            catalog,
+            source_file,
+            Some(root_nest_host),
+            &[],
+            root_nest_host,
+            classes,
+        )?;
+    }
+    Ok(())
+}
+
+fn nested_type_names(type_decl: &TypeDecl) -> Vec<String> {
+    let mut names = Vec::new();
+    collect_nested_type_names(type_decl, &mut names);
+    names
+}
+
+fn collect_nested_type_names(type_decl: &TypeDecl, names: &mut Vec<String>) {
+    for inner in &type_decl.inner_types {
+        names.push(inner.name.to_string());
+        collect_nested_type_names(inner, names);
+    }
 }
 
 fn gen_type_decl(writer: &mut ClassFileWriter, type_decl: &TypeDecl, catalog: &ClassCatalog) {
@@ -116,6 +190,7 @@ fn gen_method(
         ctx.set_super_name(ustr::Ustr::from(super_name));
         ctx.set_fields(&type_decl.fields);
         ctx.set_methods(&type_decl.methods);
+        ctx.set_anonymous_info(type_decl.anonymous.as_ref());
         ctx.lambdas = lambdas.clone();
         ctx.begin_method(method);
         declare_method_locals(&mut mw, type_decl, method);
@@ -144,6 +219,7 @@ fn gen_static_initializer(
     let mut ctx = CodegenCtx::new(writer, type_decl.name, catalog);
     ctx.set_fields(&type_decl.fields);
     ctx.set_methods(&type_decl.methods);
+    ctx.set_anonymous_info(type_decl.anonymous.as_ref());
     emit_static_field_initializers(&mut mw, &mut ctx, &type_decl.fields);
     mw.visit_insn(opcodes::RETURN);
     mw.visit_maxs(0, 0);
@@ -173,6 +249,42 @@ fn gen_constructor_prelude(
     method: &MethodDecl,
 ) {
     if method.name != INIT_METHOD {
+        return;
+    }
+
+    if let Some(call) = &method.constructor_call {
+        mw.visit_var_insn(opcodes::ALOAD, 0);
+        let mut slot = 1u16;
+        for (index, param) in method.params.iter().enumerate() {
+            if index >= call.arg_offset {
+                mw.visit_var_insn(crate::local_var::load_opcode(&param.ty), slot);
+            }
+            slot += param.ty.size() as u16;
+        }
+        let descriptor = format!(
+            "({})V",
+            call.params
+                .iter()
+                .map(|ty| ty.erasure().descriptor())
+                .collect::<String>()
+        );
+        mw.visit_method_insn(
+            opcodes::INVOKESPECIAL,
+            &call.owner.internal_name(),
+            INIT_METHOD,
+            &descriptor,
+            false,
+        );
+        if let Some(outer_this) = &ctx.outer_this {
+            mw.visit_var_insn(opcodes::ALOAD, 0);
+            mw.visit_var_insn(opcodes::ALOAD, 1);
+            mw.visit_field_insn(
+                opcodes::PUTFIELD,
+                ctx.class_name.as_str(),
+                outer_this.field_name.as_str(),
+                &outer_this.ty.descriptor(),
+            );
+        }
         return;
     }
 
@@ -240,6 +352,7 @@ fn gen_default_constructor(
     ctx.set_super_name(ustr::Ustr::from(super_name));
     ctx.set_fields(&type_decl.fields);
     ctx.set_methods(&type_decl.methods);
+    ctx.set_anonymous_info(type_decl.anonymous.as_ref());
     mw.visit_var_insn(opcodes::ALOAD, 0);
     mw.visit_method_insn(
         opcodes::INVOKESPECIAL,

@@ -29,7 +29,20 @@ impl TypeEnvironment for CodegenCtx<'_> {
     }
 
     fn resolve_current_method(&self, name: ustr::Ustr, _args: &[Ty]) -> Option<Ty> {
-        self.method_sig(name).map(|sig| sig.return_type)
+        self.method_sig(name)
+            .map(|sig| sig.return_type)
+            .or_else(|| {
+                self.catalog
+                    .resolve_instance_method(&Ty::Class(self.super_name), name.as_str(), _args)
+                    .map(|method| method.return_ty)
+                    .or_else(|| {
+                        self.enclosing_static_owner.and_then(|owner| {
+                            self.catalog
+                                .resolve_static_method(owner.as_str(), name.as_str(), _args)
+                                .map(|method| method.return_ty)
+                        })
+                    })
+            })
     }
 
     fn this_ty(&self) -> Ty {

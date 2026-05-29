@@ -232,6 +232,19 @@ impl ClassCatalog {
         self.resolve_instance_method_in_hierarchy(&owner, name, args)
     }
 
+    pub fn resolve_static_method(&self, owner: &str, name: &str, args: &[Ty]) -> Option<MethodRef> {
+        self.lookup_order(owner)
+            .into_iter()
+            .filter_map(|owner| self.best_static_method_on_owner(&owner, name, args))
+            .min_by(compare_method_matches)
+            .map(|candidate| candidate.method)
+    }
+
+    pub fn resolve_constructor(&self, owner: &str, args: &[Ty]) -> Option<MethodRef> {
+        self.best_instance_method_on_owner(owner, "<init>", args)
+            .map(|candidate| candidate.method)
+    }
+
     fn insert_simple_name(&mut self, simple_name: &str, internal_name: &str) {
         match self.simple_names.get(simple_name) {
             Some(SimpleName::Unique(existing)) if existing == internal_name => {}
@@ -271,6 +284,25 @@ impl ClassCatalog {
             .get(&(owner.to_string(), name.to_string()))?
             .iter()
             .filter(|method| method.access_flags & ACC_STATIC == 0)
+            .filter_map(|method| {
+                method_match_score(self, method, args).map(|score| MethodCandidate {
+                    method: method.clone(),
+                    score,
+                })
+            })
+            .min_by(compare_method_matches)
+    }
+
+    fn best_static_method_on_owner(
+        &self,
+        owner: &str,
+        name: &str,
+        args: &[Ty],
+    ) -> Option<MethodCandidate> {
+        self.methods
+            .get(&(owner.to_string(), name.to_string()))?
+            .iter()
+            .filter(|method| method.access_flags & ACC_STATIC != 0)
             .filter_map(|method| {
                 method_match_score(self, method, args).map(|score| MethodCandidate {
                     method: method.clone(),
@@ -396,8 +428,12 @@ fn conversion_cost(catalog: &ClassCatalog, expected: &[Ty], actual: &[Ty]) -> Op
 
 fn conversion_score(catalog: &ClassCatalog, expected: &Ty, actual: &Ty) -> Option<u16> {
     let expected = expected.erasure();
+    let actual_is_null = matches!(actual, Ty::Wildcard(None));
     let actual = actual.erasure();
     if expected == actual {
+        return Some(0);
+    }
+    if actual_is_null && matches!(expected, Ty::Class(_) | Ty::Array(_)) {
         return Some(0);
     }
     if expected.is_primitive() && actual.is_primitive() && is_assignable(&actual, &expected) {

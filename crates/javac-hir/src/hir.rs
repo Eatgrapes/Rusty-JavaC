@@ -45,6 +45,42 @@ pub struct TypeDecl {
     pub fields: Vec<FieldDecl>,
     pub methods: Vec<MethodDecl>,
     pub inner_types: Vec<Rc<TypeDecl>>,
+    pub anonymous: Option<AnonymousClassInfo>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AnonymousClassInfo {
+    pub super_constructor: SuperConstructorCall,
+    pub outer_this: Option<OuterThisInfo>,
+    pub enclosing_static_owner: Option<Ustr>,
+    pub outer_fields: Vec<CapturedField>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SuperConstructorCall {
+    pub owner: Ty,
+    pub params: Vec<Ty>,
+    pub arg_offset: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct OuterThisInfo {
+    pub field_name: Ustr,
+    pub ty: Ty,
+}
+
+#[derive(Debug, Clone)]
+pub struct CapturedField {
+    pub name: Ustr,
+    pub ty: Ty,
+    pub access_flags: u16,
+}
+
+#[derive(Debug, Clone)]
+pub struct AnonymousObject {
+    pub class_name: Ustr,
+    pub constructor_params: Vec<Ty>,
+    pub captures_enclosing_this: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -86,6 +122,7 @@ pub struct MethodDecl {
     pub throws: Vec<Ty>,
     pub body: Body,
     pub root_block: Option<Block>,
+    pub constructor_call: Option<SuperConstructorCall>,
 }
 
 #[derive(Debug, Clone)]
@@ -223,6 +260,7 @@ pub enum Expr {
     NewObject {
         class: Ty,
         args: Vec<ExprId>,
+        anonymous: Option<AnonymousObject>,
     },
 
     NewArray {

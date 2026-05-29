@@ -1,12 +1,16 @@
 use crate::hir::*;
 use crate::infer::{self, TypeEnvironment};
 use crate::lowering::literal;
+use crate::lowering::member::lower_class_members;
 use crate::lowering::syntax::ExprToken;
 use crate::lowering::types::{TypeResolver, class_type_from_name, lower_type};
 use crate::lowering::{LowerError, LowerResult};
-use javac_ast::JavaSyntaxKind;
+use javac_ast::ast::{AstNode, ClassDecl};
+use javac_ast::{JavaSyntaxKind, JavaSyntaxNode};
 use javac_ty::Ty;
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use ustr::Ustr;
 
 #[derive(Default)]
@@ -15,14 +19,43 @@ pub(super) struct BodyBuilder {
     type_resolver: TypeResolver,
     local_scopes: Vec<HashMap<Ustr, Ty>>,
     pattern_names: HashSet<Ustr>,
+    anonymous_types: Vec<Rc<TypeDecl>>,
+    anonymous_counter: Rc<Cell<u32>>,
+    can_capture_this: bool,
+    enclosing_static_owner: Option<Ustr>,
+    outer_fields: Vec<CapturedField>,
 }
 
 impl BodyBuilder {
     pub(super) fn new(type_resolver: TypeResolver) -> Self {
+        let enclosing_static_owner = type_resolver.current_class_name().map(Ustr::from);
         Self {
+            enclosing_static_owner,
             type_resolver,
+            anonymous_counter: Rc::new(Cell::new(0)),
             ..Self::default()
         }
+    }
+
+    pub(super) fn with_anonymous_context(
+        type_resolver: TypeResolver,
+        anonymous_counter: Rc<Cell<u32>>,
+        can_capture_this: bool,
+        enclosing_static_owner: Option<Ustr>,
+        outer_fields: Vec<CapturedField>,
+    ) -> Self {
+        Self {
+            type_resolver,
+            anonymous_counter,
+            can_capture_this,
+            enclosing_static_owner,
+            outer_fields,
+            ..Self::default()
+        }
+    }
+
+    pub(super) fn take_anonymous_types(&mut self) -> Vec<Rc<TypeDecl>> {
+        std::mem::take(&mut self.anonymous_types)
     }
 
     pub(super) fn alloc_stmt(&mut self, stmt: Stmt) -> StmtId {
@@ -255,7 +288,7 @@ impl BodyBuilder {
         };
         let expr = parser.parse_expr()?;
         if parser.peek().is_some() {
-            return Err(LowerError::UnsupportedExpression);
+            return Err(parser.unsupported_expression());
         }
         Ok(Some(expr))
     }
@@ -282,8 +315,18 @@ impl TypeEnvironment for BodyBuilder {
         BodyBuilder::local_ty(self, name)
     }
 
-    fn field_ty(&self, _name: Ustr) -> Option<Ty> {
-        None
+    fn field_ty(&self, name: Ustr) -> Option<Ty> {
+        self.outer_fields
+            .iter()
+            .find(|field| field.name == name)
+            .map(|field| field.ty.clone())
+            .or_else(|| {
+                self.enclosing_static_owner.and_then(|owner| {
+                    self.type_resolver
+                        .resolve_static_field(owner.as_str(), name.as_str())
+                        .map(|field| field.ty)
+                })
+            })
     }
 
     fn resolve_static_field(&self, owner: &str, name: &str) -> Option<Ty> {
@@ -303,7 +346,7 @@ impl TypeEnvironment for BodyBuilder {
     }
 
     fn super_ty(&self) -> Ty {
-        Ty::object()
+        self.type_resolver.current_super_ty()
     }
 }
 
@@ -314,6 +357,22 @@ struct ExprLowerer<'a, 'b> {
 }
 
 impl ExprLowerer<'_, '_> {
+    fn unsupported_expression(&self) -> LowerError {
+        if let Some(token) = self.peek() {
+            LowerError::UnsupportedExpressionAt {
+                line: token.line,
+                range: Some(token.range),
+            }
+        } else if let Some(token) = self.tokens.last() {
+            LowerError::UnsupportedExpressionAt {
+                line: token.line,
+                range: Some(token.range),
+            }
+        } else {
+            LowerError::UnsupportedExpression
+        }
+    }
+
     fn parse_expr(&mut self) -> LowerResult<ExprId> {
         self.parse_assignment()
     }
@@ -485,7 +544,7 @@ impl ExprLowerer<'_, '_> {
 
     fn parse_primary(&mut self) -> LowerResult<ExprId> {
         let Some(token) = self.peek().cloned() else {
-            return Err(LowerError::UnsupportedExpression);
+            return Err(self.unsupported_expression());
         };
 
         match token.kind {
@@ -587,7 +646,7 @@ impl ExprLowerer<'_, '_> {
                 self.expect(JavaSyntaxKind::RParen)?;
                 Ok(self.body.alloc_expr(Expr::Parens(inner)))
             }
-            _ => Err(LowerError::UnsupportedExpression),
+            _ => Err(self.unsupported_expression()),
         }
     }
 
@@ -650,9 +709,13 @@ impl ExprLowerer<'_, '_> {
 
         if self.eat(JavaSyntaxKind::LParen) {
             let args = self.parse_args_after_open_paren()?;
+            if self.peek_kind() == Some(JavaSyntaxKind::LBrace) || self.at_anonymous_body_member() {
+                return self.finish_anonymous_object(element_type, args);
+            }
             return Ok(self.body.alloc_expr(Expr::NewObject {
                 class: element_type,
                 args,
+                anonymous: None,
             }));
         }
 
@@ -679,6 +742,167 @@ impl ExprLowerer<'_, '_> {
             dimensions,
             initializer,
         }))
+    }
+
+    fn finish_anonymous_object(&mut self, base_type: Ty, args: Vec<ExprId>) -> LowerResult<ExprId> {
+        let body_tokens = self.take_anonymous_body_tokens()?;
+        let class_body = parse_anonymous_class_body(&body_tokens)?;
+        let class_name = self.next_anonymous_class_name()?;
+        let base_internal_name = base_type.internal_name();
+        let is_interface = self.body.type_resolver.is_interface(&base_internal_name);
+        let super_name = if is_interface {
+            "java/lang/Object".to_string()
+        } else {
+            base_internal_name.clone()
+        };
+        let arg_types = args
+            .iter()
+            .map(|arg| self.body.expr_ty(*arg))
+            .collect::<Vec<_>>();
+        let super_params = if is_interface {
+            Vec::new()
+        } else {
+            self.body
+                .type_resolver
+                .resolve_constructor(&base_type, &arg_types)
+                .map(|method| method.params)
+                .unwrap_or_else(|| arg_types.clone())
+        };
+        let captures_this = self.body.can_capture_this;
+        let outer_this = captures_this.then(|| OuterThisInfo {
+            field_name: Ustr::from("this$0"),
+            ty: self.body.type_resolver.current_class_ty(),
+        });
+        let constructor_params = anonymous_constructor_params(outer_this.as_ref(), &super_params);
+        let constructor = anonymous_constructor(
+            constructor_params.clone(),
+            SuperConstructorCall {
+                owner: if is_interface {
+                    Ty::object()
+                } else {
+                    base_type.clone()
+                },
+                params: super_params.clone(),
+                arg_offset: usize::from(captures_this),
+            },
+        );
+        let resolver = self
+            .body
+            .type_resolver
+            .for_anonymous_class(class_name.as_str(), &super_name);
+        let mut members =
+            lower_class_members(class_body, &[], &resolver, self.body.enclosing_static_owner)?;
+        let mut fields = Vec::new();
+        if let Some(outer_this) = &outer_this {
+            fields.push(outer_this_field(outer_this));
+        }
+        fields.append(&mut members.fields);
+        let mut methods = vec![constructor];
+        methods.append(&mut members.methods);
+
+        let anonymous_type = TypeDecl {
+            id: HirId(0),
+            name: class_name,
+            kind: TypeDeclKind::Class,
+            access_flags: 0,
+            super_class: (!is_interface).then_some(base_type.clone()),
+            interfaces: is_interface
+                .then_some(base_type.clone())
+                .into_iter()
+                .collect(),
+            type_params: Vec::new(),
+            generic_signature: None,
+            fields,
+            methods,
+            inner_types: members.inner_types,
+            anonymous: Some(AnonymousClassInfo {
+                super_constructor: SuperConstructorCall {
+                    owner: if is_interface {
+                        Ty::object()
+                    } else {
+                        base_type.clone()
+                    },
+                    params: super_params.clone(),
+                    arg_offset: usize::from(captures_this),
+                },
+                outer_this,
+                enclosing_static_owner: self.body.enclosing_static_owner,
+                outer_fields: self.body.outer_fields.clone(),
+            }),
+        };
+        self.body.anonymous_types.push(Rc::new(anonymous_type));
+
+        Ok(self.body.alloc_expr(Expr::NewObject {
+            class: base_type,
+            args,
+            anonymous: Some(AnonymousObject {
+                class_name,
+                constructor_params: super_params,
+                captures_enclosing_this: captures_this,
+            }),
+        }))
+    }
+
+    fn next_anonymous_class_name(&mut self) -> LowerResult<Ustr> {
+        let owner = self
+            .body
+            .type_resolver
+            .current_class_name()
+            .ok_or_else(|| self.unsupported_expression())?;
+        let next = self.body.anonymous_counter.get() + 1;
+        self.body.anonymous_counter.set(next);
+        Ok(Ustr::from(&format!("{owner}${next}")))
+    }
+
+    fn take_anonymous_body_tokens(&mut self) -> LowerResult<Vec<ExprToken>> {
+        if self.peek_kind() != Some(JavaSyntaxKind::LBrace) {
+            return self.take_body_tokens_without_open_brace();
+        }
+
+        let mut depth = 0usize;
+        let mut tokens = Vec::new();
+        loop {
+            let Some(token) = self.peek().cloned() else {
+                return Err(self.unsupported_expression());
+            };
+            self.pos += 1;
+            match token.kind {
+                JavaSyntaxKind::LBrace => depth += 1,
+                JavaSyntaxKind::RBrace => {
+                    depth = depth.saturating_sub(1);
+                    tokens.push(token);
+                    if depth == 0 {
+                        return Ok(tokens);
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+            tokens.push(token);
+        }
+    }
+
+    fn take_body_tokens_without_open_brace(&mut self) -> LowerResult<Vec<ExprToken>> {
+        let mut depth = 0usize;
+        let mut tokens = Vec::new();
+        loop {
+            let Some(token) = self.peek().cloned() else {
+                return Err(self.unsupported_expression());
+            };
+            self.pos += 1;
+            match token.kind {
+                JavaSyntaxKind::LBrace => {
+                    depth += 1;
+                    tokens.push(token);
+                }
+                JavaSyntaxKind::RBrace if depth == 0 => return Ok(tokens),
+                JavaSyntaxKind::RBrace => {
+                    depth -= 1;
+                    tokens.push(token);
+                }
+                _ => tokens.push(token),
+            }
+        }
     }
 
     fn parse_array_initializer(&mut self) -> LowerResult<ArrayInit> {
@@ -714,7 +938,7 @@ impl ExprLowerer<'_, '_> {
                 method: field,
                 args,
             })),
-            _ => Err(LowerError::UnsupportedExpression),
+            _ => Err(self.unsupported_expression()),
         }
     }
 
@@ -747,7 +971,7 @@ impl ExprLowerer<'_, '_> {
 
     fn parse_type_base(&mut self) -> LowerResult<Ty> {
         let Some(token) = self.peek().cloned() else {
-            return Err(LowerError::UnsupportedExpression);
+            return Err(self.unsupported_expression());
         };
 
         let ty = match token.kind {
@@ -760,7 +984,7 @@ impl ExprLowerer<'_, '_> {
             JavaSyntaxKind::FloatKw => Ty::Float,
             JavaSyntaxKind::DoubleKw => Ty::Double,
             JavaSyntaxKind::Ident => return self.parse_type_name(),
-            _ => return Err(LowerError::UnsupportedExpression),
+            _ => return Err(self.unsupported_expression()),
         };
         self.pos += 1;
         Ok(ty)
@@ -857,6 +1081,39 @@ impl ExprLowerer<'_, '_> {
         self.peek_kind() == Some(JavaSyntaxKind::LBrace)
     }
 
+    fn at_anonymous_body_member(&self) -> bool {
+        matches!(
+            self.peek_kind(),
+            Some(
+                JavaSyntaxKind::At
+                    | JavaSyntaxKind::PublicKw
+                    | JavaSyntaxKind::ProtectedKw
+                    | JavaSyntaxKind::PrivateKw
+                    | JavaSyntaxKind::StaticKw
+                    | JavaSyntaxKind::FinalKw
+                    | JavaSyntaxKind::AbstractKw
+                    | JavaSyntaxKind::NativeKw
+                    | JavaSyntaxKind::SynchronizedKw
+                    | JavaSyntaxKind::TransientKw
+                    | JavaSyntaxKind::VolatileKw
+                    | JavaSyntaxKind::ClassKw
+                    | JavaSyntaxKind::InterfaceKw
+                    | JavaSyntaxKind::EnumKw
+                    | JavaSyntaxKind::RecordKw
+                    | JavaSyntaxKind::Ident
+                    | JavaSyntaxKind::VoidKw
+                    | JavaSyntaxKind::BooleanKw
+                    | JavaSyntaxKind::ByteKw
+                    | JavaSyntaxKind::CharKw
+                    | JavaSyntaxKind::ShortKw
+                    | JavaSyntaxKind::IntKw
+                    | JavaSyntaxKind::LongKw
+                    | JavaSyntaxKind::FloatKw
+                    | JavaSyntaxKind::DoubleKw
+            )
+        )
+    }
+
     fn skip_block_tokens(&mut self) {
         let mut depth = 1;
         self.pos += 1;
@@ -938,16 +1195,16 @@ impl ExprLowerer<'_, '_> {
         if self.eat(kind) {
             Ok(())
         } else {
-            Err(LowerError::UnsupportedExpression)
+            Err(self.unsupported_expression())
         }
     }
 
     fn expect_ident(&mut self) -> LowerResult<String> {
         let Some(token) = self.peek().cloned() else {
-            return Err(LowerError::UnsupportedExpression);
+            return Err(self.unsupported_expression());
         };
         if token.kind != JavaSyntaxKind::Ident {
-            return Err(LowerError::UnsupportedExpression);
+            return Err(self.unsupported_expression());
         }
         self.pos += 1;
         Ok(token.text)
@@ -970,4 +1227,117 @@ fn is_primitive_type_token(kind: JavaSyntaxKind) -> bool {
 
 fn lambda_param(name: Ustr) -> LambdaParam {
     LambdaParam { name, ty: None }
+}
+
+fn parse_anonymous_class_body(tokens: &[ExprToken]) -> LowerResult<javac_ast::ast::ClassBody> {
+    let body_source = token_source(tokens);
+    let source = if tokens
+        .first()
+        .is_some_and(|token| token.kind == JavaSyntaxKind::LBrace)
+    {
+        format!("class Anonymous {body_source}")
+    } else {
+        format!("class Anonymous {{ {body_source} }}")
+    };
+    let parse = javac_parser::Parser::parse(&source);
+    if !parse.errors.is_empty() {
+        let first = tokens.first();
+        return Err(first
+            .map(|token| LowerError::UnsupportedExpressionAt {
+                line: token.line,
+                range: Some(token.range),
+            })
+            .unwrap_or(LowerError::UnsupportedExpression));
+    }
+
+    let root = JavaSyntaxNode::new_root(parse.green_node);
+    ClassDecl::cast(root.clone())
+        .or_else(|| root.children().find_map(ClassDecl::cast))
+        .and_then(|class| class.body())
+        .ok_or_else(|| {
+            tokens
+                .first()
+                .map(|token| LowerError::UnsupportedExpressionAt {
+                    line: token.line,
+                    range: Some(token.range),
+                })
+                .unwrap_or(LowerError::UnsupportedExpression)
+        })
+}
+
+fn token_source(tokens: &[ExprToken]) -> String {
+    let mut source = String::new();
+    let mut line = 1u16;
+    for token in tokens {
+        while line < token.line {
+            source.push('\n');
+            line += 1;
+        }
+        if !source.ends_with(['\n', ' ', '{', '(']) {
+            source.push(' ');
+        }
+        source.push_str(&token.text);
+    }
+    source
+}
+
+fn anonymous_constructor_params(
+    outer_this: Option<&OuterThisInfo>,
+    super_params: &[Ty],
+) -> Vec<ParamDecl> {
+    let mut params = Vec::new();
+    if let Some(outer_this) = outer_this {
+        params.push(ParamDecl {
+            name: outer_this.field_name,
+            ty: outer_this.ty.clone(),
+        });
+    }
+    params.extend(
+        super_params
+            .iter()
+            .enumerate()
+            .map(|(index, ty)| ParamDecl {
+                name: Ustr::from(&format!("arg{index}")),
+                ty: ty.clone(),
+            }),
+    );
+    params
+}
+
+fn anonymous_constructor(
+    params: Vec<ParamDecl>,
+    constructor_call: SuperConstructorCall,
+) -> MethodDecl {
+    let signature = javac_ty::MethodSig::new(
+        Ustr::from("<init>"),
+        params.iter().map(|param| param.ty.clone()).collect(),
+        Ty::Void,
+    );
+    MethodDecl {
+        id: HirId(0),
+        name: Ustr::from("<init>"),
+        params,
+        signature,
+        access_flags: 0,
+        source_line: None,
+        generic_signature: None,
+        throws: Vec::new(),
+        body: Body::default(),
+        root_block: Some(Block { stmts: Vec::new() }),
+        constructor_call: Some(constructor_call),
+    }
+}
+
+fn outer_this_field(outer_this: &OuterThisInfo) -> FieldDecl {
+    FieldDecl {
+        id: HirId(0),
+        name: outer_this.field_name,
+        ty: outer_this.ty.clone(),
+        access_flags: javac_classfile::ACC_PRIVATE
+            | javac_classfile::ACC_FINAL
+            | javac_classfile::ACC_SYNTHETIC,
+        generic_signature: None,
+        body: Body::default(),
+        initializer: None,
+    }
 }

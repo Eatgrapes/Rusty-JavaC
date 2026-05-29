@@ -75,14 +75,47 @@ pub fn gen_expr(mw: &mut MethodWriter, ctx: &mut CodegenCtx, body: &Body, expr_i
             else_expr,
         } => emit_ternary(mw, ctx, body, expr_id, *condition, *then_expr, *else_expr),
         Expr::Unary { op, operand } => ops::emit_unary(mw, ctx, body, op, *operand),
-        Expr::NewObject { class, args } => {
-            let owner = class.internal_name();
+        Expr::NewObject {
+            class,
+            args,
+            anonymous,
+        } => {
+            let owner = anonymous
+                .as_ref()
+                .map(|info| info.class_name.to_string())
+                .unwrap_or_else(|| class.internal_name());
+            let arg_types = args
+                .iter()
+                .map(|arg| expr_ty(ctx, body, *arg))
+                .collect::<Vec<_>>();
+            let constructor_params = anonymous
+                .as_ref()
+                .map(|info| info.constructor_params.clone())
+                .or_else(|| {
+                    ctx.catalog
+                        .resolve_constructor(&class.internal_name(), &arg_types)
+                        .map(|ctor| ctor.params)
+                })
+                .unwrap_or_else(|| arg_types.clone());
             mw.visit_type_insn(opcodes::NEW, &owner);
             mw.visit_insn(opcodes::DUP);
             let mut descriptor = String::from("(");
-            for arg in args {
+            if anonymous
+                .as_ref()
+                .is_some_and(|info| info.captures_enclosing_this)
+            {
+                mw.visit_var_insn(opcodes::ALOAD, 0);
+                descriptor.push_str(&Ty::Class(ctx.class_name).descriptor());
+            }
+            for (index, arg) in args.iter().enumerate() {
                 gen_expr(mw, ctx, body, *arg);
-                descriptor.push_str(&expr_ty(ctx, body, *arg).erasure().descriptor());
+                let arg_ty = &arg_types[index];
+                let param_ty = constructor_params
+                    .get(index)
+                    .cloned()
+                    .unwrap_or_else(|| arg_ty.clone());
+                coerce(mw, arg_ty, &param_ty);
+                descriptor.push_str(&param_ty.erasure().descriptor());
             }
             descriptor.push_str(")V");
             mw.visit_method_insn(opcodes::INVOKESPECIAL, &owner, "<init>", &descriptor, false);

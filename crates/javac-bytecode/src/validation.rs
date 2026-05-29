@@ -37,7 +37,10 @@ pub(crate) fn validate_type_decl(
 struct Validator {
     catalog: ClassCatalog,
     class_name: Ustr,
+    super_name: Ustr,
     fields: HashMap<Ustr, FieldInfo>,
+    outer_fields: HashMap<Ustr, FieldInfo>,
+    enclosing_static_owner: Option<Ustr>,
     methods: HashMap<Ustr, MethodSig>,
 }
 
@@ -69,11 +72,38 @@ impl Validator {
                 (method.name, sig)
             })
             .collect();
+        let outer_fields = type_decl
+            .anonymous
+            .as_ref()
+            .map(|info| {
+                info.outer_fields
+                    .iter()
+                    .map(|field| {
+                        (
+                            field.name,
+                            FieldInfo {
+                                ty: field.ty.clone(),
+                            },
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
 
         Self {
             catalog: catalog.clone(),
             class_name: type_decl.name,
+            super_name: type_decl
+                .super_class
+                .as_ref()
+                .map(|ty| Ustr::from(&ty.internal_name()))
+                .unwrap_or_else(|| Ustr::from("java/lang/Object")),
             fields,
+            outer_fields,
+            enclosing_static_owner: type_decl
+                .anonymous
+                .as_ref()
+                .and_then(|info| info.enclosing_static_owner),
             methods,
         }
     }
@@ -91,7 +121,6 @@ impl Validator {
         for param in &method.params {
             scope.locals.insert(param.name, param.ty.clone());
         }
-
         if let Some(block) = &method.root_block {
             self.validate_block(&method.body, &mut scope, block)?;
         }
@@ -379,7 +408,15 @@ impl Validator {
     }
 
     fn validate_identifier(&self, scope: &MethodScope, name: Ustr) -> ValidateResult<()> {
-        if scope.locals.contains_key(&name) || self.fields.contains_key(&name) {
+        if scope.locals.contains_key(&name)
+            || self.fields.contains_key(&name)
+            || self.outer_fields.contains_key(&name)
+            || self.enclosing_static_owner.is_some_and(|owner| {
+                self.catalog
+                    .resolve_static_field(owner.as_str(), name.as_str())
+                    .is_some()
+            })
+        {
             return Ok(());
         }
         Err(unresolved_variable(name, scope.line))
@@ -392,6 +429,11 @@ impl Validator {
         target: ExprId,
         field: Ustr,
     ) -> ValidateResult<()> {
+        if field.as_str() == "length"
+            && matches!(self.expr_ty(body, scope, target).erasure(), Ty::Array(_))
+        {
+            return Ok(());
+        }
         if let Some(owner) = static_class_name(body, target) {
             if self
                 .catalog
@@ -467,6 +509,22 @@ impl Validator {
         line: Option<u16>,
     ) -> ValidateResult<()> {
         let Some(sig) = self.methods.get(&method) else {
+            if self
+                .catalog
+                .resolve_instance_method(&Ty::Class(self.super_name), method.as_str(), arg_types)
+                .is_some()
+            {
+                return Ok(());
+            }
+            if allow_static
+                && let Some(owner) = self.enclosing_static_owner
+                && self
+                    .catalog
+                    .resolve_static_method(owner.as_str(), method.as_str(), arg_types)
+                    .is_some()
+            {
+                return Ok(());
+            }
             return Err(unresolved_method(
                 method,
                 arg_types,
@@ -508,6 +566,20 @@ impl TypeEnvironment for ValidationTypeEnv<'_> {
             .fields
             .get(&name)
             .map(|field| field.ty.clone())
+            .or_else(|| {
+                self.validator
+                    .outer_fields
+                    .get(&name)
+                    .map(|field| field.ty.clone())
+            })
+            .or_else(|| {
+                self.validator.enclosing_static_owner.and_then(|owner| {
+                    self.validator
+                        .catalog
+                        .resolve_static_field(owner.as_str(), name.as_str())
+                        .map(|field| field.ty)
+                })
+            })
     }
 
     fn resolve_static_field(&self, owner: &str, name: &str) -> Option<Ty> {
@@ -529,10 +601,22 @@ impl TypeEnvironment for ValidationTypeEnv<'_> {
             .methods
             .get(&name)
             .map(|sig| sig.return_type.clone())
+            .or_else(|| {
+                self.validator.enclosing_static_owner.and_then(|owner| {
+                    self.validator
+                        .catalog
+                        .resolve_static_method(owner.as_str(), name.as_str(), _args)
+                        .map(|method| method.return_ty)
+                })
+            })
     }
 
     fn this_ty(&self) -> Ty {
         Ty::Class(self.validator.class_name)
+    }
+
+    fn super_ty(&self) -> Ty {
+        Ty::Class(self.validator.super_name)
     }
 }
 
@@ -550,7 +634,7 @@ fn static_class_name(body: &Body, expr_id: ExprId) -> Option<&str> {
 }
 
 fn is_current_instance(body: &Body, expr_id: ExprId) -> bool {
-    matches!(body.exprs[expr_id], Expr::This)
+    matches!(body.exprs[expr_id], Expr::This | Expr::Super)
 }
 
 fn pattern_binding(body: &Body, expr_id: ExprId) -> Option<(Ustr, Ty)> {

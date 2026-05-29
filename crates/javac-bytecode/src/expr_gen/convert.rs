@@ -1,5 +1,6 @@
 use javac_classfile::MethodWriter;
 use javac_ty::Ty;
+use javac_ty::check::{boxing_type, unboxing_type};
 use rust_asm::opcodes;
 
 pub(crate) fn coerce(mw: &mut MethodWriter, from: &Ty, to: &Ty) {
@@ -7,7 +8,19 @@ pub(crate) fn coerce(mw: &mut MethodWriter, from: &Ty, to: &Ty) {
         return;
     }
 
-    emit_numeric_conversion(mw, from, to);
+    if emit_numeric_conversion(mw, from, to) {
+        return;
+    }
+
+    if emit_boxing_conversion(mw, from, to) {
+        return;
+    }
+
+    if to.erasure().is_primitive()
+        && let Some(unboxed) = emit_unboxing_conversion(mw, from)
+    {
+        emit_numeric_conversion(mw, &unboxed, to);
+    }
 }
 
 pub(crate) fn cast(mw: &mut MethodWriter, from: &Ty, to: &Ty) {
@@ -88,6 +101,47 @@ fn emit_numeric_conversion(mw: &mut MethodWriter, from: &Ty, to: &Ty) -> bool {
         }
         _ => false,
     }
+}
+
+fn emit_boxing_conversion(mw: &mut MethodWriter, from: &Ty, to: &Ty) -> bool {
+    let Some(wrapper) = boxing_type(&from.erasure()) else {
+        return false;
+    };
+    if !matches!(
+        to.erasure(),
+        Ty::Class(_) | Ty::TypeVar(_) | Ty::Wildcard(_)
+    ) {
+        return false;
+    }
+
+    let Ty::Class(owner) = wrapper else {
+        return false;
+    };
+    mw.visit_method_insn(
+        opcodes::INVOKESTATIC,
+        owner.as_str(),
+        "valueOf",
+        &format!("({})L{};", from.erasure().descriptor(), owner.as_str()),
+        false,
+    );
+    true
+}
+
+fn emit_unboxing_conversion(mw: &mut MethodWriter, from: &Ty) -> Option<Ty> {
+    let unboxed = unboxing_type(&from.erasure())?;
+    let (owner, method, descriptor) = match &unboxed {
+        Ty::Boolean => ("java/lang/Boolean", "booleanValue", "()Z"),
+        Ty::Byte => ("java/lang/Byte", "byteValue", "()B"),
+        Ty::Char => ("java/lang/Character", "charValue", "()C"),
+        Ty::Short => ("java/lang/Short", "shortValue", "()S"),
+        Ty::Int => ("java/lang/Integer", "intValue", "()I"),
+        Ty::Long => ("java/lang/Long", "longValue", "()J"),
+        Ty::Float => ("java/lang/Float", "floatValue", "()F"),
+        Ty::Double => ("java/lang/Double", "doubleValue", "()D"),
+        _ => return None,
+    };
+    mw.visit_method_insn(opcodes::INVOKEVIRTUAL, owner, method, descriptor, false);
+    Some(unboxed)
 }
 
 fn checkcast_target(ty: &Ty) -> Option<String> {

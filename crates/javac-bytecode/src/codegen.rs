@@ -1,7 +1,9 @@
 use crate::lambda::LambdaTable;
 use javac_call_resolver::ClassCatalog;
 use javac_classfile::{ClassFileWriter, Label};
-use javac_hir::hir::{Block, FieldDecl, MethodDecl};
+use javac_hir::hir::{
+    AnonymousClassInfo, Block, CapturedField, FieldDecl, MethodDecl, OuterThisInfo,
+};
 use javac_ty::{MethodSig, Ty};
 use std::collections::HashMap;
 use ustr::Ustr;
@@ -41,6 +43,9 @@ pub struct CodegenCtx<'a> {
     pub local_types: HashMap<Ustr, Ty>,
     pub fields: HashMap<Ustr, FieldInfo>,
     pub methods: HashMap<Ustr, MethodSig>,
+    pub outer_this: Option<OuterThisInfo>,
+    pub outer_fields: HashMap<Ustr, CapturedField>,
+    pub enclosing_static_owner: Option<Ustr>,
     pub break_labels: Vec<ControlTarget>,
     pub continue_labels: Vec<ControlTarget>,
     pub labeled_break_labels: Vec<(Ustr, ControlTarget)>,
@@ -62,6 +67,9 @@ impl<'a> CodegenCtx<'a> {
             local_types: HashMap::new(),
             fields: HashMap::new(),
             methods: HashMap::new(),
+            outer_this: None,
+            outer_fields: HashMap::new(),
+            enclosing_static_owner: None,
             break_labels: Vec::new(),
             continue_labels: Vec::new(),
             labeled_break_labels: Vec::new(),
@@ -94,6 +102,17 @@ impl<'a> CodegenCtx<'a> {
             let mut sig = method.signature.clone();
             sig.access_flags = method.access_flags;
             self.methods.insert(method.name, sig);
+        }
+    }
+
+    pub fn set_anonymous_info(&mut self, info: Option<&AnonymousClassInfo>) {
+        self.outer_this = info.and_then(|info| info.outer_this.clone());
+        self.enclosing_static_owner = info.and_then(|info| info.enclosing_static_owner);
+        self.outer_fields.clear();
+        if let Some(info) = info {
+            for field in &info.outer_fields {
+                self.outer_fields.insert(field.name, field.clone());
+            }
         }
     }
 
@@ -138,7 +157,17 @@ impl<'a> CodegenCtx<'a> {
     }
 
     pub fn field_ty(&self, name: Ustr) -> Option<Ty> {
-        self.fields.get(&name).map(|field| field.ty.clone())
+        self.fields
+            .get(&name)
+            .map(|field| field.ty.clone())
+            .or_else(|| self.outer_fields.get(&name).map(|field| field.ty.clone()))
+            .or_else(|| {
+                self.enclosing_static_owner.and_then(|owner| {
+                    self.catalog
+                        .resolve_static_field(owner.as_str(), name.as_str())
+                        .map(|field| field.ty)
+                })
+            })
     }
 
     pub fn field_is_static(&self, name: Ustr) -> bool {

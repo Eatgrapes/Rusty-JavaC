@@ -105,7 +105,14 @@ fn lower_class_decl(
     let generic_signature = class_signature(class.syntax(), &type_params, &resolver)?;
     let members = class
         .body()
-        .map(|body| lower_class_members(body, &type_params, &resolver))
+        .map(|body| {
+            lower_class_members(
+                body,
+                &type_params,
+                &resolver,
+                Some(Ustr::from(&internal_name)),
+            )
+        })
         .transpose()?
         .unwrap_or_default();
 
@@ -120,7 +127,8 @@ fn lower_class_decl(
         generic_signature,
         fields: members.fields,
         methods: members.methods,
-        inner_types: Vec::new(),
+        inner_types: members.inner_types,
+        anonymous: None,
     })
 }
 

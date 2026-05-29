@@ -32,6 +32,8 @@ pub enum LowerError {
     UnknownType { name: String, line: u16 },
     #[error("unsupported expression")]
     UnsupportedExpression,
+    #[error("unsupported expression")]
+    UnsupportedExpressionAt { line: u16, range: Option<TextRange> },
     #[error("pattern variable `{0}` is not in scope")]
     PatternVariableOutOfScope(String),
 }

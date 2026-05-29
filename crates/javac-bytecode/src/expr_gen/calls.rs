@@ -14,11 +14,17 @@ enum ReceiverStyle {
 
 pub(super) fn emit_field_access(
     mw: &mut MethodWriter,
-    ctx: &CodegenCtx,
+    ctx: &mut CodegenCtx,
     body: &Body,
     target: ExprId,
     field: Ustr,
 ) -> bool {
+    if field.as_str() == "length" && matches!(expr_ty(ctx, body, target).erasure(), Ty::Array(_)) {
+        gen_expr(mw, ctx, body, target);
+        mw.visit_insn(opcodes::ARRAYLENGTH);
+        return true;
+    }
+
     if let Some(field_ref) = static_field_ref(ctx, body, target, field) {
         mw.visit_field_insn(
             opcodes::GETSTATIC,
@@ -62,6 +68,16 @@ pub(super) fn emit_method_call(
         ) {
             gen_expr(mw, ctx, body, target);
             emit_call_args(mw, ctx, body, args, &method_ref);
+            if values::is_super(body, target) {
+                mw.visit_method_insn(
+                    opcodes::INVOKESPECIAL,
+                    &method_ref.owner,
+                    &method_ref.name,
+                    &method_ref.descriptor,
+                    false,
+                );
+                return true;
+            }
             mw.visit_method_insn(
                 method_ref.opcode,
                 &method_ref.owner,
@@ -82,11 +98,44 @@ pub(super) fn emit_method_call(
                 ReceiverStyle::ExplicitThis,
             );
         }
-    } else if emit_current_class_call(mw, ctx, body, method, args, ReceiverStyle::Implicit) {
+    } else if emit_current_class_call(mw, ctx, body, method, args, ReceiverStyle::Implicit)
+        || emit_enclosing_static_call(mw, ctx, body, method, args)
+    {
         return true;
     }
 
     false
+}
+
+fn emit_enclosing_static_call(
+    mw: &mut MethodWriter,
+    ctx: &mut CodegenCtx,
+    body: &Body,
+    method: Ustr,
+    args: &[ExprId],
+) -> bool {
+    let Some(owner) = ctx.enclosing_static_owner else {
+        return false;
+    };
+    let arg_types = arg_types(ctx, body, args);
+    let Some(method_ref) =
+        ctx.catalog
+            .resolve_static_method(owner.as_str(), method.as_str(), &arg_types)
+    else {
+        return false;
+    };
+
+    for (arg, param_ty) in args.iter().zip(&method_ref.params) {
+        emit_coerced_arg(mw, ctx, body, *arg, param_ty);
+    }
+    mw.visit_method_insn(
+        opcodes::INVOKESTATIC,
+        &method_ref.owner,
+        &method_ref.name,
+        &method_ref.descriptor,
+        false,
+    );
+    true
 }
 
 pub(super) fn static_field_ref(
@@ -108,7 +157,7 @@ fn emit_current_class_call(
     receiver_style: ReceiverStyle,
 ) -> bool {
     let Some(sig) = ctx.method_sig(method) else {
-        return false;
+        return emit_inherited_current_call(mw, ctx, body, method, args);
     };
 
     let is_static = sig.access_flags & javac_classfile::ACC_STATIC != 0;
@@ -118,8 +167,8 @@ fn emit_current_class_call(
         return false;
     }
 
-    for arg in args {
-        gen_expr(mw, ctx, body, *arg);
+    for (arg, param_ty) in args.iter().zip(&sig.params) {
+        emit_coerced_arg(mw, ctx, body, *arg, param_ty);
     }
 
     mw.visit_method_insn(
@@ -132,6 +181,34 @@ fn emit_current_class_call(
         method.as_str(),
         &sig.descriptor(),
         false,
+    );
+    true
+}
+
+fn emit_inherited_current_call(
+    mw: &mut MethodWriter,
+    ctx: &mut CodegenCtx,
+    body: &Body,
+    method: Ustr,
+    args: &[ExprId],
+) -> bool {
+    let arg_types = arg_types(ctx, body, args);
+    let Some(method_ref) = ctx.catalog.resolve_instance_method(
+        &Ty::Class(ctx.super_name),
+        method.as_str(),
+        &arg_types,
+    ) else {
+        return false;
+    };
+
+    mw.visit_var_insn(opcodes::ALOAD, 0);
+    emit_call_args(mw, ctx, body, args, &method_ref);
+    mw.visit_method_insn(
+        method_ref.opcode,
+        &method_ref.owner,
+        &method_ref.name,
+        &method_ref.descriptor,
+        method_ref.is_interface,
     );
     true
 }
@@ -153,16 +230,33 @@ fn emit_call_args(
         && should_expand_varargs(ctx, body, args, method_ref)
         && let Ty::Array(element_ty) = method_ref.params[fixed_count].erasure()
     {
-        for arg in &args[..fixed_count] {
-            gen_expr(mw, ctx, body, *arg);
+        for (arg, param_ty) in args[..fixed_count]
+            .iter()
+            .zip(&method_ref.params[..fixed_count])
+        {
+            emit_coerced_arg(mw, ctx, body, *arg, param_ty);
         }
         emit_varargs_array(mw, ctx, body, &args[fixed_count..], &element_ty);
         return;
     }
 
-    for arg in args {
-        gen_expr(mw, ctx, body, *arg);
+    for (index, arg) in args.iter().copied().enumerate() {
+        gen_expr(mw, ctx, body, arg);
+        if let Some(param_ty) = method_ref.params.get(index) {
+            coerce(mw, &expr_ty(ctx, body, arg), param_ty);
+        }
     }
+}
+
+fn emit_coerced_arg(
+    mw: &mut MethodWriter,
+    ctx: &mut CodegenCtx,
+    body: &Body,
+    arg: ExprId,
+    param_ty: &Ty,
+) {
+    gen_expr(mw, ctx, body, arg);
+    coerce(mw, &expr_ty(ctx, body, arg), param_ty);
 }
 
 fn should_expand_varargs(

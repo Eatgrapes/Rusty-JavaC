@@ -35,6 +35,11 @@ pub fn expr_ty(env: &impl TypeEnvironment, body: &Body, expr_id: ExprId) -> Ty {
         Expr::Super => env.super_ty(),
         Expr::ClassName(name) => Ty::Class(*name),
         Expr::FieldAccess { target, field } => {
+            if field.as_str() == "length"
+                && matches!(expr_ty(env, body, *target).erasure(), Ty::Array(_))
+            {
+                return Ty::Int;
+            }
             if let Some(owner) = static_class_name(body, *target)
                 && let Some(ty) = env.resolve_static_field(owner, field.as_str())
             {
@@ -116,11 +121,16 @@ fn intrinsic_expr_ty(env: &impl TypeEnvironment, body: &Body, expr_id: ExprId) -
         Expr::BoolLiteral(_) => Ty::Boolean,
         Expr::CharLiteral(_) => Ty::Char,
         Expr::StringLiteral(_) => Ty::string(),
-        Expr::NullLiteral => Ty::object(),
+        Expr::NullLiteral => Ty::Wildcard(None),
         Expr::This => env.this_ty(),
         Expr::Super => env.super_ty(),
         Expr::ClassName(name) => Ty::Class(*name),
-        Expr::NewObject { class, .. } => class.clone(),
+        Expr::NewObject {
+            class, anonymous, ..
+        } => anonymous
+            .as_ref()
+            .map(|info| Ty::Class(info.class_name))
+            .unwrap_or_else(|| class.clone()),
         Expr::PostInc(inner) | Expr::PostDec(inner) | Expr::Parens(inner) => {
             expr_ty(env, body, *inner)
         }
