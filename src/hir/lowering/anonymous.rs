@@ -91,6 +91,8 @@ pub(super) fn lower_object(
             enclosing_static_owner: body.enclosing_static_owner,
             outer_fields: body.outer_fields.clone(),
         }),
+        record_components: Vec::new(),
+        annotations: Vec::new(),
     }));
 
     Ok(body.alloc_expr(Expr::NewObject {

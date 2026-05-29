@@ -2,7 +2,9 @@ use crate::bytecode::codegen::CodegenCtx;
 use crate::bytecode::error::BytecodeError;
 use crate::bytecode::lambda::{self, LambdaTable};
 use crate::call_resolver::ClassCatalog;
-use crate::classfile::ClassFileWriter;
+use crate::classfile::{
+    AnnotationElementMetadata, AnnotationElementValueMetadata, AnnotationMetadata, ClassFileWriter,
+};
 use crate::hir::*;
 use crate::ty::Ty;
 use rust_asm::constants::V21;
@@ -46,21 +48,23 @@ pub fn gen_classes_with_source_file(
     catalog: &ClassCatalog,
     source_file: Option<&str>,
 ) -> Result<Vec<GeneratedClass>, BytecodeError> {
-    let type_decl = unit
-        .type_decls
-        .first()
-        .ok_or_else(|| BytecodeError::new("no type declarations"))?;
+    if unit.type_decls.is_empty() {
+        return Err(BytecodeError::new("no type declarations"));
+    }
+
     let mut classes = Vec::new();
-    let nest_members = nested_type_names(type_decl);
-    gen_type_decl_class(
-        type_decl,
-        catalog,
-        source_file,
-        None,
-        &nest_members,
-        type_decl.name.as_str(),
-        &mut classes,
-    )?;
+    for type_decl in &unit.type_decls {
+        let nest_members = nested_type_names(type_decl);
+        gen_type_decl_class(
+            type_decl,
+            catalog,
+            source_file,
+            None,
+            &nest_members,
+            type_decl.name.as_str(),
+            &mut classes,
+        )?;
+    }
     Ok(classes)
 }
 
@@ -133,6 +137,16 @@ fn gen_type_decl(writer: &mut ClassFileWriter, type_decl: &TypeDecl, catalog: &C
     if let Some(signature) = &type_decl.generic_signature {
         writer.visit_signature(signature);
     }
+    for annotation in &type_decl.annotations {
+        writer.visit_runtime_invisible_annotation(annotation_metadata(annotation));
+    }
+    for component in &type_decl.record_components {
+        writer.visit_record_component(
+            component.name.as_str(),
+            &component.ty.erasure().descriptor(),
+            component.generic_signature.as_deref(),
+        );
+    }
 
     gen_fields(writer, &type_decl.fields);
     gen_static_initializer(writer, type_decl, catalog);
@@ -151,6 +165,28 @@ fn gen_type_decl(writer: &mut ClassFileWriter, type_decl: &TypeDecl, catalog: &C
             &mut counter,
         );
         gen_method(writer, type_decl, method, &super_name, catalog, &lambdas);
+    }
+}
+
+fn annotation_metadata(annotation: &AnnotationUse) -> AnnotationMetadata {
+    AnnotationMetadata {
+        descriptor: annotation.descriptor.clone(),
+        elements: annotation
+            .elements
+            .iter()
+            .map(|element| AnnotationElementMetadata {
+                name: element.name.to_string(),
+                value: match &element.value {
+                    AnnotationValue::String(value) => {
+                        AnnotationElementValueMetadata::String(value.to_string())
+                    }
+                    AnnotationValue::Int(value) => AnnotationElementValueMetadata::Int(*value),
+                    AnnotationValue::Boolean(value) => {
+                        AnnotationElementValueMetadata::Boolean(*value)
+                    }
+                },
+            })
+            .collect(),
     }
 }
 
@@ -182,7 +218,11 @@ fn gen_method(
         mw.visit_exception(&exception.internal_name());
     }
 
-    if method_has_code(method)
+    if matches!(type_decl.kind, TypeDeclKind::Enum) && method.name == "values" {
+        gen_enum_values_method(&mut mw, type_decl);
+    } else if matches!(type_decl.kind, TypeDeclKind::Enum) && method.name == "valueOf" {
+        gen_enum_value_of_method(&mut mw, type_decl);
+    } else if method_has_code(method)
         && let Some(block) = &method.root_block
     {
         mw.visit_code();
@@ -210,7 +250,9 @@ fn gen_static_initializer(
     type_decl: &TypeDecl,
     catalog: &ClassCatalog,
 ) {
-    if !has_static_field_initializers(&type_decl.fields) {
+    if !has_static_field_initializers(&type_decl.fields)
+        && !matches!(type_decl.kind, TypeDeclKind::Enum)
+    {
         return;
     }
 
@@ -221,9 +263,84 @@ fn gen_static_initializer(
     ctx.set_methods(&type_decl.methods);
     ctx.set_anonymous_info(type_decl.anonymous.as_ref());
     emit_static_field_initializers(&mut mw, &mut ctx, &type_decl.fields);
+    if matches!(type_decl.kind, TypeDeclKind::Enum) {
+        emit_enum_values_initializer(&mut mw, type_decl);
+    }
     mw.visit_insn(opcodes::RETURN);
     mw.visit_maxs(0, 0);
     mw.visit_end(writer);
+}
+
+fn gen_enum_values_method(mw: &mut crate::classfile::MethodWriter, type_decl: &TypeDecl) {
+    mw.visit_code();
+    let array_descriptor = enum_array_descriptor(type_decl);
+    mw.visit_field_insn(
+        opcodes::GETSTATIC,
+        type_decl.name.as_str(),
+        "$VALUES",
+        &array_descriptor,
+    );
+    mw.visit_method_insn(
+        opcodes::INVOKEVIRTUAL,
+        &array_descriptor,
+        "clone",
+        "()Ljava/lang/Object;",
+        false,
+    );
+    mw.visit_type_insn(opcodes::CHECKCAST, &array_descriptor);
+    mw.visit_insn(opcodes::ARETURN);
+    mw.visit_maxs(0, 0);
+}
+
+fn gen_enum_value_of_method(mw: &mut crate::classfile::MethodWriter, type_decl: &TypeDecl) {
+    mw.visit_code();
+    mw.visit_ldc_insn_type(type_decl.name.as_str());
+    mw.visit_var_insn(opcodes::ALOAD, 0);
+    mw.visit_method_insn(
+        opcodes::INVOKESTATIC,
+        "java/lang/Enum",
+        "valueOf",
+        "(Ljava/lang/Class;Ljava/lang/String;)Ljava/lang/Enum;",
+        false,
+    );
+    mw.visit_type_insn(opcodes::CHECKCAST, type_decl.name.as_str());
+    mw.visit_insn(opcodes::ARETURN);
+    mw.visit_maxs(0, 0);
+}
+
+fn emit_enum_values_initializer(mw: &mut crate::classfile::MethodWriter, type_decl: &TypeDecl) {
+    let constants = enum_constant_fields(type_decl);
+    mw.visit_ldc_insn_int(constants.len() as i32);
+    mw.visit_type_insn(opcodes::ANEWARRAY, type_decl.name.as_str());
+    for (index, field) in constants.iter().enumerate() {
+        mw.visit_insn(opcodes::DUP);
+        mw.visit_ldc_insn_int(index as i32);
+        mw.visit_field_insn(
+            opcodes::GETSTATIC,
+            type_decl.name.as_str(),
+            field.name.as_str(),
+            &field.ty.descriptor(),
+        );
+        mw.visit_insn(opcodes::AASTORE);
+    }
+    mw.visit_field_insn(
+        opcodes::PUTSTATIC,
+        type_decl.name.as_str(),
+        "$VALUES",
+        &enum_array_descriptor(type_decl),
+    );
+}
+
+fn enum_constant_fields(type_decl: &TypeDecl) -> Vec<&FieldDecl> {
+    type_decl
+        .fields
+        .iter()
+        .filter(|field| field.access_flags & crate::classfile::ACC_ENUM != 0)
+        .collect()
+}
+
+fn enum_array_descriptor(type_decl: &TypeDecl) -> String {
+    format!("[L{};", type_decl.name)
 }
 
 fn declare_method_locals(
@@ -256,7 +373,7 @@ fn gen_constructor_prelude(
         mw.visit_var_insn(opcodes::ALOAD, 0);
         let mut slot = 1u16;
         for (index, param) in method.params.iter().enumerate() {
-            if index >= call.arg_offset {
+            if index >= call.arg_offset && index < call.arg_offset + call.params.len() {
                 mw.visit_var_insn(crate::bytecode::local_var::load_opcode(&param.ty), slot);
             }
             slot += param.ty.size() as u16;
@@ -303,7 +420,10 @@ fn method_has_code(method: &MethodDecl) -> bool {
 }
 
 fn class_access_flags(type_decl: &TypeDecl) -> u16 {
-    if matches!(type_decl.kind, TypeDeclKind::Class) {
+    if matches!(
+        type_decl.kind,
+        TypeDeclKind::Class | TypeDeclKind::Record | TypeDeclKind::Enum
+    ) {
         type_decl.access_flags | crate::classfile::ACC_SUPER
     } else {
         type_decl.access_flags

@@ -48,6 +48,20 @@ pub(super) fn emit_field_access(
         return true;
     }
 
+    if matches!(expr_ty(ctx, body, target).erasure(), Ty::Class(owner) if owner == ctx.class_name)
+        && let Some(ty) = ctx.field_ty(field)
+        && !ctx.field_is_static(field)
+    {
+        gen_expr(mw, ctx, body, target);
+        mw.visit_field_insn(
+            opcodes::GETFIELD,
+            ctx.class_name.as_str(),
+            field.as_str(),
+            &ty.descriptor(),
+        );
+        return true;
+    }
+
     false
 }
 
@@ -60,7 +74,18 @@ pub(super) fn emit_method_call(
     args: &[ExprId],
 ) -> bool {
     if let Some(target) = target {
+        if let Some(owner) = values::static_class_name(body, target) {
+            return emit_static_method_call(mw, ctx, body, owner, method, args);
+        }
+
         let arg_types = arg_types(ctx, body, args);
+        if matches!(expr_ty(ctx, body, target).erasure(), Ty::Class(owner) if owner == ctx.class_name)
+        {
+            if ctx.method_sig(method).is_some() {
+                return emit_current_class_receiver_call(mw, ctx, body, target, method, args);
+            }
+            return emit_inherited_receiver_call(mw, ctx, body, target, method, args);
+        }
         if let Some(method_ref) = ctx.catalog.resolve_instance_method(
             &expr_ty(ctx, body, target),
             method.as_str(),
@@ -107,6 +132,64 @@ pub(super) fn emit_method_call(
     false
 }
 
+fn emit_current_class_receiver_call(
+    mw: &mut MethodWriter,
+    ctx: &mut CodegenCtx,
+    body: &Body,
+    target: ExprId,
+    method: Ustr,
+    args: &[ExprId],
+) -> bool {
+    let Some(sig) = ctx.method_sig(method) else {
+        return false;
+    };
+    if sig.access_flags & crate::classfile::ACC_STATIC != 0 {
+        return false;
+    }
+
+    gen_expr(mw, ctx, body, target);
+    for (arg, param_ty) in args.iter().zip(&sig.params) {
+        emit_coerced_arg(mw, ctx, body, *arg, param_ty);
+    }
+    mw.visit_method_insn(
+        opcodes::INVOKEVIRTUAL,
+        ctx.class_name.as_str(),
+        method.as_str(),
+        &sig.descriptor(),
+        false,
+    );
+    true
+}
+
+fn emit_inherited_receiver_call(
+    mw: &mut MethodWriter,
+    ctx: &mut CodegenCtx,
+    body: &Body,
+    target: ExprId,
+    method: Ustr,
+    args: &[ExprId],
+) -> bool {
+    let arg_types = arg_types(ctx, body, args);
+    let Some(method_ref) = ctx.catalog.resolve_instance_method(
+        &Ty::Class(ctx.super_name),
+        method.as_str(),
+        &arg_types,
+    ) else {
+        return false;
+    };
+
+    gen_expr(mw, ctx, body, target);
+    emit_call_args(mw, ctx, body, args, &method_ref);
+    mw.visit_method_insn(
+        method_ref.opcode,
+        &method_ref.owner,
+        &method_ref.name,
+        &method_ref.descriptor,
+        method_ref.is_interface,
+    );
+    true
+}
+
 fn emit_enclosing_static_call(
     mw: &mut MethodWriter,
     ctx: &mut CodegenCtx,
@@ -145,7 +228,67 @@ pub(super) fn static_field_ref(
     field: Ustr,
 ) -> Option<FieldRef> {
     let owner = values::static_class_name(body, target)?;
+    if owner == ctx.class_name.as_str()
+        && ctx.field_is_static(field)
+        && let Some(ty) = ctx.field_ty(field)
+    {
+        return Some(FieldRef {
+            owner: owner.to_string(),
+            name: field.to_string(),
+            descriptor: ty.descriptor(),
+            ty,
+            access_flags: crate::classfile::ACC_STATIC,
+        });
+    }
     ctx.catalog.resolve_static_field(owner, field.as_str())
+}
+
+fn emit_static_method_call(
+    mw: &mut MethodWriter,
+    ctx: &mut CodegenCtx,
+    body: &Body,
+    owner: &str,
+    method: Ustr,
+    args: &[ExprId],
+) -> bool {
+    let arg_types = arg_types(ctx, body, args);
+    let method_ref = ctx
+        .catalog
+        .resolve_static_method(owner, method.as_str(), &arg_types)
+        .or_else(|| {
+            if owner != ctx.class_name.as_str() {
+                return None;
+            }
+            ctx.method_sig(method)
+                .filter(|sig| sig.access_flags & crate::classfile::ACC_STATIC != 0)
+                .map(|sig| {
+                    let access_flags = sig.access_flags;
+                    MethodRef {
+                        owner: owner.to_string(),
+                        name: method.to_string(),
+                        descriptor: sig.descriptor(),
+                        return_ty: sig.return_type,
+                        params: sig.params,
+                        opcode: opcodes::INVOKESTATIC,
+                        is_interface: false,
+                        is_varargs: access_flags & crate::classfile::ACC_VARARGS != 0,
+                        access_flags,
+                    }
+                })
+        });
+    let Some(method_ref) = method_ref else {
+        return false;
+    };
+
+    emit_call_args(mw, ctx, body, args, &method_ref);
+    mw.visit_method_insn(
+        opcodes::INVOKESTATIC,
+        &method_ref.owner,
+        &method_ref.name,
+        &method_ref.descriptor,
+        false,
+    );
+    true
 }
 
 fn emit_current_class_call(

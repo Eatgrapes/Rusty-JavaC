@@ -340,6 +340,12 @@ impl TypeEnvironment for BodyBuilder {
             .map(|method| method.return_ty)
     }
 
+    fn resolve_static_method(&self, owner: &str, name: &str, args: &[Ty]) -> Option<Ty> {
+        self.type_resolver
+            .resolve_static_method(owner, name, args)
+            .map(|method| method.return_ty)
+    }
+
     fn this_ty(&self) -> Ty {
         self.type_resolver.current_class_ty()
     }

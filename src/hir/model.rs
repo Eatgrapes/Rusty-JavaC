@@ -46,6 +46,8 @@ pub struct TypeDecl {
     pub methods: Vec<MethodDecl>,
     pub inner_types: Vec<Rc<TypeDecl>>,
     pub anonymous: Option<AnonymousClassInfo>,
+    pub record_components: Vec<RecordComponentDecl>,
+    pub annotations: Vec<AnnotationUse>,
 }
 
 #[derive(Debug, Clone)]
@@ -108,6 +110,32 @@ pub struct FieldDecl {
     pub generic_signature: Option<String>,
     pub body: Body,
     pub initializer: Option<ExprId>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RecordComponentDecl {
+    pub name: Ustr,
+    pub ty: Ty,
+    pub generic_signature: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AnnotationUse {
+    pub descriptor: String,
+    pub elements: Vec<AnnotationElement>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AnnotationElement {
+    pub name: Ustr,
+    pub value: AnnotationValue,
+}
+
+#[derive(Debug, Clone)]
+pub enum AnnotationValue {
+    String(Ustr),
+    Int(i64),
+    Boolean(bool),
 }
 
 #[derive(Debug, Clone)]

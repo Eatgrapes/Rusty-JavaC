@@ -47,6 +47,7 @@ struct Validator {
 #[derive(Clone)]
 struct FieldInfo {
     ty: Ty,
+    access_flags: u16,
 }
 
 impl Validator {
@@ -59,6 +60,7 @@ impl Validator {
                     field.name,
                     FieldInfo {
                         ty: field.ty.clone(),
+                        access_flags: field.access_flags,
                     },
                 )
             })
@@ -83,6 +85,7 @@ impl Validator {
                             field.name,
                             FieldInfo {
                                 ty: field.ty.clone(),
+                                access_flags: field.access_flags,
                             },
                         )
                     })
@@ -435,11 +438,7 @@ impl Validator {
             return Ok(());
         }
         if let Some(owner) = static_class_name(body, target) {
-            if self
-                .catalog
-                .resolve_static_field(owner, field.as_str())
-                .is_none()
-            {
+            if !self.has_static_field(owner, field) {
                 return Err(unresolved_field(
                     field,
                     &display_internal_name(owner),
@@ -460,6 +459,9 @@ impl Validator {
         }
 
         let receiver = self.expr_ty(body, scope, target);
+        if self.is_current_class_ty(&receiver) && self.fields.contains_key(&field) {
+            return Ok(());
+        }
         Err(unresolved_field(field, &receiver.to_string(), scope.line))
     }
 
@@ -477,7 +479,40 @@ impl Validator {
             .collect::<Vec<_>>();
 
         if let Some(target) = target {
+            if let Some(owner) = static_class_name(body, target) {
+                if self
+                    .catalog
+                    .resolve_static_method(owner, method.as_str(), &arg_types)
+                    .is_some()
+                    || (owner == self.class_name.as_str()
+                        && self.methods.get(&method).is_some_and(|sig| {
+                            sig.access_flags & crate::classfile::ACC_STATIC != 0
+                        }))
+                {
+                    return Ok(());
+                }
+                return Err(unresolved_method(
+                    method,
+                    &arg_types,
+                    &display_internal_name(owner),
+                    scope.line,
+                ));
+            }
+
             let receiver = self.expr_ty(body, scope, target);
+            if self.is_current_class_ty(&receiver)
+                && (self.methods.contains_key(&method)
+                    || self
+                        .catalog
+                        .resolve_instance_method(
+                            &Ty::Class(self.super_name),
+                            method.as_str(),
+                            &arg_types,
+                        )
+                        .is_some())
+            {
+                return Ok(());
+            }
             if self
                 .catalog
                 .resolve_instance_method(&receiver, method.as_str(), &arg_types)
@@ -539,6 +574,31 @@ impl Validator {
         Ok(())
     }
 
+    fn has_static_field(&self, owner: &str, field: Ustr) -> bool {
+        self.catalog
+            .resolve_static_field(owner, field.as_str())
+            .is_some()
+            || (owner == self.class_name.as_str()
+                && self
+                    .fields
+                    .get(&field)
+                    .is_some_and(|info| info.access_flags & crate::classfile::ACC_STATIC != 0))
+    }
+
+    fn current_static_field_ty(&self, owner: &str, field: &str) -> Option<Ty> {
+        if owner != self.class_name.as_str() {
+            return None;
+        }
+        self.fields
+            .get(&Ustr::from(field))
+            .filter(|info| info.access_flags & crate::classfile::ACC_STATIC != 0)
+            .map(|info| info.ty.clone())
+    }
+
+    fn is_current_class_ty(&self, ty: &Ty) -> bool {
+        matches!(ty.erasure(), Ty::Class(name) if name == self.class_name)
+    }
+
     fn expr_ty(&self, body: &Body, scope: &MethodScope, expr_id: ExprId) -> Ty {
         infer::expr_ty(
             &ValidationTypeEnv {
@@ -587,13 +647,43 @@ impl TypeEnvironment for ValidationTypeEnv<'_> {
             .catalog
             .resolve_static_field(owner, name)
             .map(|field| field.ty)
+            .or_else(|| self.validator.current_static_field_ty(owner, name))
     }
 
     fn resolve_instance_method(&self, receiver: &Ty, name: &str, args: &[Ty]) -> Option<Ty> {
+        if self.validator.is_current_class_ty(receiver) {
+            if let Some(sig) = self.validator.methods.get(&Ustr::from(name))
+                && sig.access_flags & crate::classfile::ACC_STATIC == 0
+            {
+                return Some(sig.return_type.clone());
+            }
+            return self
+                .validator
+                .catalog
+                .resolve_instance_method(&Ty::Class(self.validator.super_name), name, args)
+                .map(|method| method.return_ty);
+        }
         self.validator
             .catalog
             .resolve_instance_method(receiver, name, args)
             .map(|method| method.return_ty)
+    }
+
+    fn resolve_static_method(&self, owner: &str, name: &str, args: &[Ty]) -> Option<Ty> {
+        self.validator
+            .catalog
+            .resolve_static_method(owner, name, args)
+            .map(|method| method.return_ty)
+            .or_else(|| {
+                if owner != self.validator.class_name.as_str() {
+                    return None;
+                }
+                self.validator
+                    .methods
+                    .get(&Ustr::from(name))
+                    .filter(|sig| sig.access_flags & crate::classfile::ACC_STATIC != 0)
+                    .map(|sig| sig.return_type.clone())
+            })
     }
 
     fn resolve_current_method(&self, name: Ustr, _args: &[Ty]) -> Option<Ty> {

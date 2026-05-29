@@ -4,4 +4,7 @@ pub mod reader;
 pub mod writer;
 
 pub use access_flags::*;
-pub use writer::{ClassFileWriter, FieldWriter, Label, MethodWriter};
+pub use writer::{
+    AnnotationElementMetadata, AnnotationElementValueMetadata, AnnotationMetadata, ClassFileWriter,
+    FieldWriter, Label, MethodWriter,
+};

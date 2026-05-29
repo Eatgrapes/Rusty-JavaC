@@ -1,5 +1,9 @@
+#[path = "lowering/annotation.rs"]
+mod annotation;
 #[path = "lowering/anonymous.rs"]
 mod anonymous;
+#[path = "lowering/enum_decl.rs"]
+mod enum_decl;
 #[path = "lowering/error.rs"]
 mod error;
 #[path = "lowering/expr.rs"]
@@ -10,6 +14,8 @@ mod literal;
 mod member;
 #[path = "lowering/modifiers.rs"]
 mod modifiers;
+#[path = "lowering/record.rs"]
+mod record;
 #[path = "lowering/signature.rs"]
 mod signature;
 #[path = "lowering/stmt.rs"]

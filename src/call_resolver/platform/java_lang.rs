@@ -21,6 +21,7 @@ pub const CLASSES: &[&str] = &[
     "java/lang/Math",
     "java/lang/Number",
     "java/lang/Object",
+    "java/lang/Record",
     "java/lang/Runtime",
     "java/lang/RuntimeException",
     "java/lang/Short",
@@ -31,9 +32,15 @@ pub const CLASSES: &[&str] = &[
     "java/lang/Thread",
     "java/lang/Throwable",
     "java/lang/Void",
+    "java/lang/annotation/Annotation",
 ];
 
-use super::{Field, Method, Parent, parent, public_instance_method, public_static_field};
+pub const INTERFACES: &[&str] = &["java/lang/annotation/Annotation"];
+
+use super::{
+    Field, Method, Parent, parent, public_instance_method, public_static_field,
+    public_static_method,
+};
 
 pub const FIELDS: &[Field] = &[
     public_static_field("java/lang/System", "out", "Ljava/io/PrintStream;"),
@@ -45,6 +52,13 @@ pub const METHODS: &[Method] = &[
     public_instance_method("java/lang/Object", "hashCode", "()I"),
     public_instance_method("java/lang/Object", "equals", "(Ljava/lang/Object;)Z"),
     public_instance_method("java/lang/Object", "toString", "()Ljava/lang/String;"),
+    public_instance_method("java/lang/Enum", "name", "()Ljava/lang/String;"),
+    public_instance_method("java/lang/Enum", "ordinal", "()I"),
+    public_static_method(
+        "java/lang/Enum",
+        "valueOf",
+        "(Ljava/lang/Class;Ljava/lang/String;)Ljava/lang/Enum;",
+    ),
     public_instance_method("java/lang/Throwable", "getMessage", "()Ljava/lang/String;"),
     public_instance_method("java/lang/String", "equals", "(Ljava/lang/Object;)Z"),
     public_instance_method(
@@ -103,4 +117,6 @@ pub const PARENTS: &[Parent] = &[
     parent("java/lang/StringBuilder", "java/lang/Object"),
     parent("java/lang/System", "java/lang/Object"),
     parent("java/lang/Throwable", "java/lang/Object"),
+    parent("java/lang/Enum", "java/lang/Object"),
+    parent("java/lang/Record", "java/lang/Object"),
 ];

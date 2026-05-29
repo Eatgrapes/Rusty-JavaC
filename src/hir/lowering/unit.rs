@@ -1,5 +1,6 @@
 use crate::ast::{
     AstNode, ClassDecl, CompilationUnit as AstCompilationUnit, ImportDecl as AstImportDecl,
+    TypeDecl as AstTypeDecl,
 };
 use crate::ast::{JavaSyntaxKind, JavaSyntaxNode};
 use crate::call_resolver::ClassCatalog;
@@ -61,39 +62,89 @@ fn lower_top_level_types(
     catalog: &ClassCatalog,
 ) -> LowerResult<Vec<TypeDecl>> {
     let mut pending_flags = 0;
+    let mut pending_modifiers = None;
     let mut type_decls = Vec::new();
     for child in node.children() {
         match child.kind() {
-            JavaSyntaxKind::ModifierList => pending_flags = access_flags(&child),
-            JavaSyntaxKind::ClassDecl => {
-                let class = ClassDecl::cast(child).ok_or(LowerError::UnsupportedTypeDeclaration)?;
-                type_decls.push(lower_class_decl(
-                    class,
+            JavaSyntaxKind::ModifierList => {
+                pending_flags = access_flags(&child);
+                pending_modifiers = Some(child);
+            }
+            JavaSyntaxKind::ClassDecl
+            | JavaSyntaxKind::InterfaceDecl
+            | JavaSyntaxKind::EnumDecl
+            | JavaSyntaxKind::RecordDecl
+            | JavaSyntaxKind::AnnotationDecl => {
+                let decl =
+                    AstTypeDecl::cast(child).ok_or(LowerError::UnsupportedTypeDeclaration)?;
+                type_decls.push(lower_type_decl(
+                    decl,
                     pending_flags,
+                    pending_modifiers.as_ref(),
                     package,
                     imports,
                     catalog,
                 )?);
                 pending_flags = 0;
+                pending_modifiers = None;
             }
-            JavaSyntaxKind::InterfaceDecl
-            | JavaSyntaxKind::EnumDecl
-            | JavaSyntaxKind::RecordDecl
-            | JavaSyntaxKind::AnnotationDecl => pending_flags = 0,
             _ => {}
         }
     }
 
-    if type_decls.len() != 1 {
+    if type_decls.is_empty() {
         return Err(LowerError::ExpectedSingleTopLevelClass);
     }
 
     Ok(type_decls)
 }
 
+fn lower_type_decl(
+    decl: AstTypeDecl,
+    access_flags: u16,
+    modifiers: Option<&JavaSyntaxNode>,
+    package: Option<&Package>,
+    imports: &[Import],
+    catalog: &ClassCatalog,
+) -> LowerResult<TypeDecl> {
+    match decl {
+        AstTypeDecl::Class(class) => {
+            lower_class_decl(class, access_flags, modifiers, package, imports, catalog)
+        }
+        AstTypeDecl::Record(record) => crate::hir::lowering::record::lower_record_decl(
+            record,
+            access_flags,
+            modifiers,
+            package,
+            imports,
+            catalog,
+        ),
+        AstTypeDecl::Enum(enum_decl) => crate::hir::lowering::enum_decl::lower_enum_decl(
+            enum_decl,
+            access_flags,
+            modifiers,
+            package,
+            imports,
+            catalog,
+        ),
+        AstTypeDecl::Annotation(annotation) => {
+            crate::hir::lowering::annotation::lower_annotation_decl(
+                annotation,
+                access_flags,
+                modifiers,
+                package,
+                imports,
+                catalog,
+            )
+        }
+        AstTypeDecl::Interface(_) => Err(LowerError::UnsupportedTypeDeclaration),
+    }
+}
+
 fn lower_class_decl(
     class: ClassDecl,
     access_flags: u16,
+    modifiers: Option<&JavaSyntaxNode>,
     package: Option<&Package>,
     imports: &[Import],
     catalog: &ClassCatalog,
@@ -101,6 +152,8 @@ fn lower_class_decl(
     let name = class.name().ok_or(LowerError::MissingClassName)?;
     let internal_name = internal_class_name(package, name.text());
     let resolver = TypeResolver::for_class(package, imports, &internal_name, catalog)?;
+    let annotations =
+        crate::hir::lowering::annotation::lower_annotation_uses(modifiers, package, &resolver)?;
     let type_params = lower_type_params(class.syntax(), &resolver)?;
     let generic_signature = class_signature(class.syntax(), &type_params, &resolver)?;
     let members = class
@@ -129,10 +182,12 @@ fn lower_class_decl(
         methods: members.methods,
         inner_types: members.inner_types,
         anonymous: None,
+        record_components: Vec::new(),
+        annotations,
     })
 }
 
-fn internal_class_name(package: Option<&Package>, simple_name: &str) -> String {
+pub(super) fn internal_class_name(package: Option<&Package>, simple_name: &str) -> String {
     match package {
         Some(package) => format!(
             "{}/{}",

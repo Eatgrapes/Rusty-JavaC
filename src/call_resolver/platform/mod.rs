@@ -62,6 +62,20 @@ pub(crate) const fn public_interface_method(
     public_method(owner, name, descriptor, true)
 }
 
+pub(crate) const fn public_static_method(
+    owner: &'static str,
+    name: &'static str,
+    descriptor: &'static str,
+) -> Method {
+    Method {
+        owner,
+        name,
+        descriptor,
+        access_flags: ACC_PUBLIC | ACC_STATIC,
+        is_interface: false,
+    }
+}
+
 const fn public_method(
     owner: &'static str,
     name: &'static str,
@@ -93,6 +107,7 @@ const PACKAGE_CLASSES: &[&[&str]] = &[
 ];
 
 const PACKAGE_INTERFACES: &[&[&str]] = &[
+    java_lang::INTERFACES,
     java_io::INTERFACES,
     java_util::INTERFACES,
     java_util_function::INTERFACES,

@@ -12,6 +12,10 @@ pub trait TypeEnvironment {
 
     fn resolve_instance_method(&self, receiver: &Ty, name: &str, args: &[Ty]) -> Option<Ty>;
 
+    fn resolve_static_method(&self, _owner: &str, _name: &str, _args: &[Ty]) -> Option<Ty> {
+        None
+    }
+
     fn resolve_current_method(&self, _name: Ustr, _args: &[Ty]) -> Option<Ty> {
         None
     }
@@ -62,6 +66,12 @@ pub fn expr_ty(env: &impl TypeEnvironment, body: &Body, expr_id: ExprId) -> Ty {
                 .map(|arg| expr_ty(env, body, *arg))
                 .collect::<Vec<_>>();
             if let Some(target) = target {
+                if let Some(owner) = static_class_name(body, *target)
+                    && let Some(return_ty) =
+                        env.resolve_static_method(owner, method.as_str(), &arg_types)
+                {
+                    return return_ty;
+                }
                 let receiver = expr_ty(env, body, *target);
                 if let Some(return_ty) =
                     env.resolve_instance_method(&receiver, method.as_str(), &arg_types)

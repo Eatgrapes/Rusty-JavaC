@@ -98,6 +98,15 @@ impl TypeResolver {
         self.catalog.resolve_instance_method(receiver, name, args)
     }
 
+    pub fn resolve_static_method(
+        &self,
+        owner: &str,
+        name: &str,
+        args: &[Ty],
+    ) -> Option<crate::call_resolver::MethodRef> {
+        self.catalog.resolve_static_method(owner, name, args)
+    }
+
     pub fn resolve_constructor(
         &self,
         owner: &Ty,

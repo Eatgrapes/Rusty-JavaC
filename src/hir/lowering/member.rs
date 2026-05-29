@@ -21,11 +21,43 @@ pub(super) struct ClassMembers {
     pub inner_types: Vec<Rc<TypeDecl>>,
 }
 
+#[derive(Clone, Copy, Default)]
+pub(super) struct MemberOptions {
+    pub default_field_flags: u16,
+    pub default_method_flags: u16,
+    pub lower_constructors: bool,
+}
+
+impl MemberOptions {
+    pub(super) fn class() -> Self {
+        Self {
+            lower_constructors: true,
+            ..Self::default()
+        }
+    }
+}
+
 pub(super) fn lower_class_members(
     body: ClassBody,
     class_type_params: &[crate::ty::TypeParam],
     resolver: &TypeResolver,
     enclosing_static_owner: Option<Ustr>,
+) -> LowerResult<ClassMembers> {
+    lower_members(
+        body.syntax(),
+        class_type_params,
+        resolver,
+        enclosing_static_owner,
+        MemberOptions::class(),
+    )
+}
+
+pub(super) fn lower_members(
+    body: &JavaSyntaxNode,
+    class_type_params: &[crate::ty::TypeParam],
+    resolver: &TypeResolver,
+    enclosing_static_owner: Option<Ustr>,
+    options: MemberOptions,
 ) -> LowerResult<ClassMembers> {
     let mut pending_flags = 0;
     let mut fields = Vec::new();
@@ -34,14 +66,14 @@ pub(super) fn lower_class_members(
     let anonymous_counter = Rc::new(Cell::new(0));
     let type_vars = type_var_set(class_type_params, &[]);
 
-    for child in body.syntax().children() {
+    for child in body.children() {
         match child.kind() {
             JavaSyntaxKind::ModifierList => pending_flags = access_flags(&child),
             JavaSyntaxKind::FieldDecl => {
                 let field = AstFieldDecl::cast(child).ok_or(LowerError::UnsupportedClassMember)?;
                 let mut lowered = lower_field_decl(
                     field,
-                    pending_flags,
+                    pending_flags | options.default_field_flags,
                     fields.len() as u32,
                     &type_vars,
                     resolver,
@@ -60,7 +92,7 @@ pub(super) fn lower_class_members(
                     AstMethodDecl::cast(child).ok_or(LowerError::UnsupportedClassMember)?;
                 let mut lowered = lower_method_decl(
                     method,
-                    pending_flags,
+                    pending_flags | options.default_method_flags,
                     methods.len() as u32,
                     class_type_params,
                     resolver,
@@ -74,7 +106,7 @@ pub(super) fn lower_class_members(
                 methods.push(lowered.method);
                 pending_flags = 0;
             }
-            JavaSyntaxKind::ConstructorDecl => {
+            JavaSyntaxKind::ConstructorDecl if options.lower_constructors => {
                 methods.push(lower_constructor_decl(
                     &child,
                     pending_flags,
@@ -84,10 +116,12 @@ pub(super) fn lower_class_members(
                 )?);
                 pending_flags = 0;
             }
+            JavaSyntaxKind::ConstructorDecl => pending_flags = 0,
             JavaSyntaxKind::ClassDecl
             | JavaSyntaxKind::InterfaceDecl
             | JavaSyntaxKind::EnumDecl
-            | JavaSyntaxKind::RecordDecl => pending_flags = 0,
+            | JavaSyntaxKind::RecordDecl
+            | JavaSyntaxKind::AnnotationDecl => pending_flags = 0,
             _ => {}
         }
     }

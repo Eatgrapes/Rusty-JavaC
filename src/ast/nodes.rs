@@ -152,8 +152,40 @@ impl InterfaceDecl {
 }
 
 ast_node!(EnumDecl, EnumDecl);
+impl EnumDecl {
+    pub fn name(&self) -> Option<JavaSyntaxToken> {
+        token(&self.0, JavaSyntaxKind::Ident)
+    }
+    pub fn body(&self) -> Option<EnumBody> {
+        child(&self.0)
+    }
+}
+
 ast_node!(RecordDecl, RecordDecl);
+impl RecordDecl {
+    pub fn name(&self) -> Option<JavaSyntaxToken> {
+        token(&self.0, JavaSyntaxKind::Ident)
+    }
+    pub fn component_list(&self) -> Option<RecordComponentList> {
+        child(&self.0)
+    }
+    pub fn body(&self) -> Option<ClassBody> {
+        child(&self.0)
+    }
+}
+
 ast_node!(AnnotationDecl, AnnotationDecl);
+impl AnnotationDecl {
+    pub fn name(&self) -> Option<JavaSyntaxToken> {
+        token(&self.0, JavaSyntaxKind::Ident)
+    }
+    pub fn body(&self) -> Option<ClassBody> {
+        child(&self.0)
+    }
+}
+
+ast_node!(EnumBody, EnumBody);
+ast_node!(RecordComponentList, RecordComponentList);
 
 ast_node!(ClassBody, ClassBody);
 impl ClassBody {

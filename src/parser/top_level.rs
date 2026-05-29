@@ -76,7 +76,7 @@ pub(crate) fn modifier_list(p: &mut Parser) {
     loop {
         if p.at_any(&mods) {
             p.bump();
-        } else if p.at(At) {
+        } else if p.at(At) && p.look(1) != InterfaceKw {
             annotation(p);
         } else {
             break;

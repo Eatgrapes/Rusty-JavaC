@@ -311,6 +311,12 @@ impl TypeEnvironment for LambdaTypeEnv<'_> {
             .map(|method| method.return_ty)
     }
 
+    fn resolve_static_method(&self, owner: &str, name: &str, args: &[Ty]) -> Option<Ty> {
+        self.catalog
+            .resolve_static_method(owner, name, args)
+            .map(|method| method.return_ty)
+    }
+
     fn resolve_current_method(&self, name: ustr::Ustr, _args: &[Ty]) -> Option<Ty> {
         self.methods.get(&name).map(|sig| sig.return_type.clone())
     }
