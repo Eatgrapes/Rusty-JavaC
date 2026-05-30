@@ -1,30 +1,16 @@
-#[path = "lowering/annotation.rs"]
 mod annotation;
-#[path = "lowering/anonymous.rs"]
 mod anonymous;
-#[path = "lowering/enum_decl.rs"]
 mod enum_decl;
-#[path = "lowering/error.rs"]
 mod error;
-#[path = "lowering/expr.rs"]
 mod expr;
-#[path = "lowering/literal.rs"]
 mod literal;
-#[path = "lowering/member.rs"]
 mod member;
-#[path = "lowering/modifiers.rs"]
 mod modifiers;
-#[path = "lowering/record.rs"]
 mod record;
-#[path = "lowering/signature.rs"]
 mod signature;
-#[path = "lowering/stmt.rs"]
 mod stmt;
-#[path = "lowering/syntax.rs"]
 mod syntax;
-#[path = "lowering/types.rs"]
 mod types;
-#[path = "lowering/unit.rs"]
 mod unit;
 
 use crate::ast::JavaSyntaxNode;

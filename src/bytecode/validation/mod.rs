@@ -1,6 +1,4 @@
-#[path = "validation/diagnostic.rs"]
 mod diagnostic;
-#[path = "validation/scope.rs"]
 mod scope;
 
 use crate::bytecode::error::BytecodeError;
